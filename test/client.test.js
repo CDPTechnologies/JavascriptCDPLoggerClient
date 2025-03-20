@@ -1,22 +1,19 @@
-// client.test.js
 global.WebSocket = require('ws');
 const Client = require('../client');
 const fakeData = require('./fakeData');
 
-
 describe('ClientTester', () => {
   let client;
   beforeEach(() => {
-      // Override _connect to return a fake ws object that doesn't try to connect.
-  Client.prototype._connect = function(url) {
-    return {
-      _url: url,
-      close: jest.fn(),
-      // You can add any other dummy methods as needed.
+    // Override _connect to return a fake ws object that doesn't try to connect.
+    Client.prototype._connect = function(url) {
+      return {
+        _url: url,
+        close: jest.fn(),
+      };
     };
-  };
-    // Create a new client instance.
-    client = new Client('127.0.0.1', 17000, true);
+    // Create a new client instance using two parameters: endpoint and autoReconnect.
+    client = new Client('127.0.0.1:17000', true);
     // Adjust the client’s lastTimeRequest so that a new time request will be triggered.
     client.lastTimeRequest = Date.now() / 1000 - 11;
     // Prepopulate the lookup maps.
@@ -33,15 +30,12 @@ describe('ClientTester', () => {
   });
 
   test('test_run_event_loop', () => {
-    // In our JS version we might not have a runEventLoop,
-    // so we simulate it by adding a dummy method.
     client.runEventLoop = jest.fn();
     client.runEventLoop();
     expect(client.runEventLoop).toHaveBeenCalled();
   });
 
   test('test_disconnect', () => {
-    // Replace ws and _cleanupQueuedRequests with mocks.
     client.ws = { close: jest.fn() };
     client._cleanupQueuedRequests = jest.fn();
     client.disconnect();
@@ -95,7 +89,6 @@ describe('ClientTester', () => {
       done();
     });
   });
-  
 
   test('test_version_request', done => {
     client.isOpen = true;
@@ -133,8 +126,8 @@ describe('ClientTester', () => {
     client._sendLogLimitsRequest = jest.fn();
     client.requestLogLimits()
       .then(limits => {
-        expect(limits.start_s).toBeCloseTo(1529497537.61);
-        expect(limits.end_s).toBeCloseTo(1531389483.02);
+        expect(limits.startS).toBeCloseTo(1529497537.61);
+        expect(limits.endS).toBeCloseTo(1531389483.02);
         done();
       })
       .catch(done.fail);
@@ -149,8 +142,8 @@ describe('ClientTester', () => {
     client._sendLogLimitsRequest = jest.fn();
     client.requestLogLimits()
       .then(limits => {
-        expect(limits.start_s).toBeCloseTo(1529497537.61 + 10);
-        expect(limits.end_s).toBeCloseTo(1531389483.02 + 10);
+        expect(limits.startS).toBeCloseTo(1529497537.61 + 10);
+        expect(limits.endS).toBeCloseTo(1531389483.02 + 10);
         done();
       })
       .catch(done.fail);
@@ -194,14 +187,36 @@ describe('ClientTester', () => {
     client.isOpen = true;
     client._sendTimeRequest = jest.fn();
     client._sendLoggedNodesRequest = jest.fn();
-    client.requestDataPoints(["Outputt", "CPULoad"], 1531313250.0, 1531461231.0, 500)
+
+    // Remove "Output" so that the lookup fails.
+    delete client.nameToId["Output"];
+    for (const id in client.idToName) {
+      if (client.idToName[id] === "Output") {
+        delete client.idToName[id];
+      }
+    }
+
+    client.requestDataPoints(["Output", "CPULoad"], 1531313250.0, 1531461231.0, 500)
       .catch(error => {
         expect(error).toBeInstanceOf(Error);
-        expect(error.message).toMatch(/Outputt/);
+        expect(error.message).toMatch(/Output/);
         done();
       });
-    // Simulate a logged nodes response that does not include "Outputt"
-    const response = fakeData.createLoggedNodesResponse(2);
+    // Simulate a logged nodes response that does NOT include "Output".
+    const response = {
+      messageType: fakeData.Container.Type.eSignalInfoResponse,
+      signalInfoResponse: {
+        requestId: 2,
+        name: ["CPULoad", "MemUsed", "CDPSignal"],
+        id: [1, 2, 3],
+        type: [],
+        path: [
+          "loggerApp.CPULoad",
+          "loggerApp.MemUsed",
+          "loggerApp.CDPSignal"
+        ]
+      }
+    };
     client._parseMessage(response);
   });
 

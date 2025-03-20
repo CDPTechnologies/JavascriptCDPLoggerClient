@@ -1,22 +1,47 @@
-// Example: client.js
 const root = require('./generated/containerPb.js');
 const Container = root.DBMessaging.Protobuf.Container;
 
 class Client {
-  constructor(host, port = 17000, autoReconnect = true) {
+  /**
+   * @param {string} endpoint - The logger endpoint (e.g. "127.0.0.1:17000" or "ws://127.0.0.1:17000")
+   * @param {boolean} [autoReconnect=true] - Automatically reconnect if the connection is lost
+   */
+  constructor(endpoint, autoReconnect = true) {
+    // If endpoint does not start with "ws://" or "wss://", prepend "ws://"
+    let url = endpoint;
+    if (!/^wss?:\/\//.test(url)) {
+      url = `ws://${url}`;
+    }
+
     this.reqId = -1;
     this.autoReconnect = autoReconnect;
+
+    // Time synchronization is enabled by default.
+    this.enableTimeSync = true;
+
     this.isOpen = false;
     this.queuedRequests = {};
     this.storedPromises = {};
     this.nameToId = {};
     this.idToName = {};
+
+    // Time-diff related
     this.timeDiff = 0;
     this.timeReceived = null;
     this.lastTimeRequest = Date.now() / 1000;
     this.haveSentQueuedReq = false;
     this.roundTripTimes = {};
-    this.ws = this._connect(`ws://${host}:${port}`);
+
+    // Create the WebSocket connection
+    this.ws = this._connect(url);
+  }
+
+  /**
+   * Enable or disable time synchronization.
+   * @param {boolean} enable - If true, time sync is enabled; if false, time sync is disabled.
+   */
+  setEnableTimeSync(enable) {
+    this.enableTimeSync = enable;
   }
 
   _connect(url) {
@@ -32,7 +57,9 @@ class Client {
 
   _onOpen(ws) {
     this.isOpen = true;
-    this._updateTimeDiff();
+    if (this.enableTimeSync) {
+      this._updateTimeDiff();
+    }
     this.lastTimeRequest = Date.now() / 1000;
   }
 
@@ -133,9 +160,7 @@ class Client {
     return promise;
   }
 
-
   _handleMessage(ws, message) {
-    // console.log("Raw data:", message);
     const data = Container.decode(new Uint8Array(message));
     this._parseMessage(data);
   }
@@ -149,6 +174,7 @@ class Client {
           reject(new Error(data.error.errorMessage));
         }
         break;
+
       case Container.Type.eTimeResponse:
         this.timeReceived = Date.now() / 1000;
         if (this.storedPromises[data.timeResponse.requestId]) {
@@ -157,45 +183,62 @@ class Client {
           resolve(data.timeResponse.timestamp);
         }
         break;
-      case Container.Type.eSignalInfoResponse:
+
+      case Container.Type.eSignalInfoResponse: {
         const nodes = [];
         this.nameToId = {};
         this.idToName = {};
+
+        // Handle tag support: convert each tagMap entry if present
         for (let i = 0; i < data.signalInfoResponse.name.length; i++) {
           const node = {
             name: data.signalInfoResponse.name[i],
             routing: data.signalInfoResponse.path[i]
           };
+
+          if (data.signalInfoResponse.tagMap && data.signalInfoResponse.tagMap[i]) {
+            node.tags = this._convertTagMap(data.signalInfoResponse.tagMap[i]);
+          }
+
           this.nameToId[data.signalInfoResponse.name[i]] = data.signalInfoResponse.id[i];
           this.idToName[data.signalInfoResponse.id[i]] = data.signalInfoResponse.name[i];
+
           nodes.push(node);
         }
+
         if (this.storedPromises[data.signalInfoResponse.requestId]) {
           const { resolve } = this.storedPromises[data.signalInfoResponse.requestId];
           delete this.storedPromises[data.signalInfoResponse.requestId];
           resolve(nodes);
         }
         break;
+      }
+
       case Container.Type.eCriterionLimitsResponse:
-        data.criterionLimitsResponse.criterionMin += this.timeDiff;
-        data.criterionLimitsResponse.criterionMax += this.timeDiff;
-        const limits = {
-          start_s: data.criterionLimitsResponse.criterionMin,
-          end_s: data.criterionLimitsResponse.criterionMax
-        };
-        if (this.storedPromises[data.criterionLimitsResponse.requestId]) {
-          const { resolve } = this.storedPromises[data.criterionLimitsResponse.requestId];
-          delete this.storedPromises[data.criterionLimitsResponse.requestId];
-          resolve(limits);
+        if (this.enableTimeSync) {
+          data.criterionLimitsResponse.criterionMin += this.timeDiff;
+          data.criterionLimitsResponse.criterionMax += this.timeDiff;
+        }
+        {
+          const limits = {
+            startS: data.criterionLimitsResponse.criterionMin,
+            endS: data.criterionLimitsResponse.criterionMax
+          };
+          if (this.storedPromises[data.criterionLimitsResponse.requestId]) {
+            const { resolve } = this.storedPromises[data.criterionLimitsResponse.requestId];
+            delete this.storedPromises[data.criterionLimitsResponse.requestId];
+            resolve(limits);
+          }
         }
         break;
-      case Container.Type.eVersionResponse:
+
+      case Container.Type.eVersionResponse: {
         const version = parseFloat(data.versionResponse.version);
         if (version < 3.0) {
           if (this.storedPromises[data.versionResponse.requestId]) {
             const { reject } = this.storedPromises[data.versionResponse.requestId];
             delete this.storedPromises[data.versionResponse.requestId];
-            reject(new Error("CDP version needs to be 3.0 or newer."));
+            reject(new Error("CDP version needs to be 4.3 or newer."));
           }
         } else {
           if (this.storedPromises[data.versionResponse.requestId]) {
@@ -205,11 +248,15 @@ class Client {
           }
         }
         break;
-      case Container.Type.eSignalDataResponse:
+      }
+
+      case Container.Type.eSignalDataResponse: {
         let dataPoints = [];
         let index = 0;
         for (const row of data.signalDataResponse.row) {
-          data.signalDataResponse.criterion[index] += this.timeDiff;
+          if (this.enableTimeSync) {
+            data.signalDataResponse.criterion[index] += this.timeDiff;
+          }
           let signalNames = [];
           for (const signalId of row.signalId) {
             signalNames.push(this.idToName[signalId]);
@@ -232,9 +279,32 @@ class Client {
           resolve(dataPoints);
         }
         break;
+      }
+
       default:
         console.error("Unknown message type", data.messageType);
     }
+  }
+
+  /**
+   * Helper to convert a TagMap entry into a simple JS object:
+   *   {
+   *     "tagKey": { value: "someValue", source: "someSource" },
+   *     ...
+   *   }
+   */
+  _convertTagMap(tagMapObj) {
+    const result = {};
+    if (!tagMapObj || !tagMapObj.tags) {
+      return result;
+    }
+    for (const [tagKey, tagInfo] of Object.entries(tagMapObj.tags)) {
+      result[tagKey] = {
+        value: tagInfo.value,
+        source: tagInfo.source
+      };
+    }
+    return result;
   }
 
   _createValue(signalNames, minValues, maxValues, lastValues) {
@@ -250,18 +320,19 @@ class Client {
   }
 
   _valueFromVariant(value) {
-    if (value.dValue !== undefined) return value.dValue;
-    if (value.fValue !== undefined) return value.fValue;
-    if (value.ui64Value !== undefined) return value.ui64Value;
-    if (value.i64Value !== undefined) return value.i64Value;
-    if (value.uiValue !== undefined) return value.uiValue;
-    if (value.iValue !== undefined) return value.iValue;
-    if (value.usValue !== undefined) return value.usValue;
-    if (value.sValue !== undefined) return value.sValue;
-    if (value.ucValue !== undefined) return value.ucValue;
-    if (value.cValue !== undefined) return value.cValue;
-    if (value.bValue !== undefined) return value.bValue;
-    if (value.strValue !== undefined) return value.strValue;
+    if (!value) return null;
+    if (Object.prototype.hasOwnProperty.call(value, 'dValue')) return value.dValue;
+    if (Object.prototype.hasOwnProperty.call(value, 'fValue')) return value.fValue;
+    if (Object.prototype.hasOwnProperty.call(value, 'ui64Value')) return value.ui64Value;
+    if (Object.prototype.hasOwnProperty.call(value, 'i64Value')) return value.i64Value;
+    if (Object.prototype.hasOwnProperty.call(value, 'uiValue')) return value.uiValue;
+    if (Object.prototype.hasOwnProperty.call(value, 'iValue')) return value.iValue;
+    if (Object.prototype.hasOwnProperty.call(value, 'usValue')) return value.usValue;
+    if (Object.prototype.hasOwnProperty.call(value, 'sValue')) return value.sValue;
+    if (Object.prototype.hasOwnProperty.call(value, 'ucValue')) return value.ucValue;
+    if (Object.prototype.hasOwnProperty.call(value, 'cValue')) return value.cValue;
+    if (Object.prototype.hasOwnProperty.call(value, 'bValue')) return value.bValue;
+    if (Object.prototype.hasOwnProperty.call(value, 'strValue')) return value.strValue;
     return null;
   }
 
@@ -287,12 +358,14 @@ class Client {
   }
 
   _timeRequest() {
+    if (!this.enableTimeSync) return;
     if ((Date.now() / 1000) > this.lastTimeRequest + 10) {
       this._updateTimeDiff();
     }
   }
 
   _updateTimeDiff() {
+    if (!this.enableTimeSync) return;
     const requestId = this._getRequestId();
     const timeSent = Date.now() / 1000;
     this._requestTime(requestId)
@@ -305,16 +378,21 @@ class Client {
   }
 
   _requestTime(reqId) {
+    if (!this.enableTimeSync) {
+      return Promise.resolve(0);
+    }
     const requestId = reqId;
     this.lastTimeRequest = Date.now() / 1000;
+    // Always send the time request.
     this._sendTimeRequest(requestId);
-    return new Promise((resolve, reject) => {
+    // Create the promise and store the callbacks.
+    const promise = new Promise((resolve, reject) => {
       this.storedPromises[requestId] = { resolve, reject };
-    });
+    });    
+    return promise;
   }
-
+  
   _sendTimeRequest(requestId) {
-    // Create a Container message for time request
     const container = Container.create();
     container.messageType = Container.Type.eTimeRequest;
     container.timeRequest = { requestId: requestId };
@@ -323,6 +401,7 @@ class Client {
   }
 
   _setTimeDiff(timestamp, timeSent) {
+    if (!this.enableTimeSync) return;
     const clientTime = this.timeReceived;
     const roundTripTime = clientTime - timeSent;
     const serverTime = (timestamp / 1e9) + roundTripTime / 2;
@@ -408,8 +487,8 @@ class Client {
       requestId: requestId,
       signalId: nodeIds,
       numOfDatapoints: noOfDataPoints,
-      criterionMin: startS - this.timeDiff,
-      criterionMax: endS - this.timeDiff
+      criterionMin: this.enableTimeSync ? (startS - this.timeDiff) : startS,
+      criterionMax: this.enableTimeSync ? (endS - this.timeDiff) : endS
     };
     const buffer = Container.encode(container).finish();
     this.ws.send(buffer);
