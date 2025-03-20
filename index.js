@@ -1,18 +1,28 @@
-// index.js
+// Example demonstration
 global.WebSocket = require('ws');
 const Client = require('./client');
 
-const client = new Client('127.0.0.1', 17000, false);
+// Create a new client, disabling autoReconnect (false)
+const client = new Client('ws://127.0.0.1:17000', false);
 
-// Print the node information (name and routing)
+// Print the node information (name, routing, and tags)
 function printLoggedNodes() {
   client.requestLoggedNodes()
     .then(nodes => {
       console.log("Connected nodes:");
       nodes.forEach(node => {
+        // Basic node info
         console.log(`Name: ${node.name}, Routing: ${node.routing}`);
+        
+        // If tags are available, then log them
+        if (node.tags) {
+          console.log("Tags:");
+          Object.entries(node.tags).forEach(([key, tagInfo]) => {
+            console.log(`  ${key}: value=${tagInfo.value}, source=${tagInfo.source}`);
+          });
+        }
+        console.log('--------------------');
       });
-      console.log('--------------------');
     })
     .catch(err => {
       console.error("Error retrieving logged nodes:", err);
@@ -32,6 +42,7 @@ function onDataPointsReceived(dataPoints) {
     }
     console.log('--------------------');
   });
+
   // When finished processing, disconnect and exit
   setTimeout(() => {
     client.disconnect();
@@ -41,7 +52,8 @@ function onDataPointsReceived(dataPoints) {
 
 function requestDataPoints(limits) {
   console.log("Log limits received:", limits);
-  return client.requestDataPoints(["Output"], limits.start_s, limits.end_s, 25);
+  // Request data for the node named "Output" within the retrieved time limits
+  return client.requestDataPoints(["Output"], limits.startS, limits.endS, 25);
 }
 
 function onError(error) {
