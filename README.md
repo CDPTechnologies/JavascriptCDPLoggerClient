@@ -21,6 +21,12 @@ To run the automatic tests with fake data, execute:
 npm test
 ```
 
+To test the time sync functionality using simulated response:
+
+```bash
+node test/timeSync.test.js
+```
+
 
 ## Usage
 
@@ -34,6 +40,12 @@ https://cdpstudio.com/manual/cdp/cdplogger/cdplogger-configuration-example.html
 
 ```bash
 node index.js
+```
+
+For usage related to events run:
+
+```bash
+node event.js
 ```
 
 
