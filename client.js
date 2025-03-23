@@ -182,7 +182,7 @@ class Client {
    *   codeMask: 0,
    *   limit: 100,
    *   offset: 0,
-   *   flags: 1  // Numeric flags as defined in your protocol
+   *   flags: 1
    * }
    * @returns {Promise<Array>} Resolves with an array of events.
    */

@@ -1,6 +1,7 @@
 // event.js
 global.WebSocket = require('ws');
 const Client = require('./client');
+// NOTE: Event support is only on API version 4.0.0+
 
 /**
  * Recursively normalizes an object/value.

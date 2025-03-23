@@ -50,50 +50,11 @@ async function printDataPoints() {
   }
 }
 
-// Print events retrieved within a time range corresponding to UTC 9:40.
-// In this example, we use a 5-minute window starting at UTC 9:40.
-async function printEvents() {
-  try {
-    // Specify the target time for events in UTC.
-    // Adjust the date as needed; here we assume a specific date.
-    const targetDate = new Date("2025-03-21T09:38:00Z");
-    const targetTime = targetDate.getTime() / 1000;
-    // Define a window of 5 minutes (300 seconds)
-    const timeWindow = 5 * 60;
-
-    const eventQuery = {
-      timeRangeBegin: targetTime,
-      timeRangeEnd: targetTime + timeWindow,
-      codeMask: 0,
-      limit: 100,
-      offset: 0,
-      flags: 0,
-      // Optionally, add senderConditions or dataConditions if desired.
-    };
-
-    const events = await client.requestEvents(eventQuery);
-    console.log("Events retrieved:");
-    if (!events || events.length === 0) {
-      console.log("No events found with the current query.");
-    } else {
-      events.forEach(evt => {
-        console.log(`Timestamp: ${evt.timestampSec}`);
-        console.log(`  Code:   ${evt.data && evt.data.Code ? evt.data.Code : "N/A"}`);
-        console.log(`  Source: ${evt.data && evt.data.Source ? evt.data.Source : "N/A"}`);
-        console.log(`  Text:   ${evt.data && evt.data.Text ? evt.data.Text : "N/A"}`);
-        console.log('--------------------');
-      });
-    }
-  } catch (err) {
-    console.error("Error retrieving events:", err);
-  }
-}
 
 async function main() {
   try {
     printLoggedNodes();
     await printDataPoints();
-    await printEvents();
   } catch (error) {
     console.error("Error in main:", error);
   } finally {
