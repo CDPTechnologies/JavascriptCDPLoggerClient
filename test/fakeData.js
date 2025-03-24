@@ -1,3 +1,5 @@
+// fakeData.js
+
 // Define a simple Container object to simulate our protobuf types.
 const Container = {
   Type: {

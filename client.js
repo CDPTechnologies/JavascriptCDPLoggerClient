@@ -1,8 +1,12 @@
+/* client.js */
 const WebSocket = require('ws');
 const root = require('./generated/containerPb.js');
 const Container = root.DBMessaging.Protobuf.Container;
 const CDPValueType = root.ICD.Protobuf.CDPValueType;
 
+/**
+ * A client for interacting with CDP Logger or LogServer via WebSocket.
+ */
 class Client {
   /**
    * @param {string} endpoint - The logger endpoint (e.g. "127.0.0.1:17000" or "ws://127.0.0.1:17000")
@@ -27,7 +31,7 @@ class Client {
     this.nameToId = {};
     this.idToName = {};
 
-    // New mapping for signal types.
+    // Mapping for signal types (in case we need to interpret values).
     this.nameToType = {};
 
     // Time-diff related
@@ -43,7 +47,13 @@ class Client {
 
   /**
    * Enable or disable time synchronization.
-   * @param {boolean} enable - If true, time sync is enabled; if false, time sync is disabled.
+   *
+   * Note:
+   * Time sync is triggered on-demand (e.g., with the next request) or after a timeout.
+   * Re-enabling time sync will automatically sync on the next operation.
+   * For immediate sync, call `_updateTimeDiff()` explicitly.
+   *
+   * @param {boolean} enable - True to enable, false to disable time sync.
    */
   setEnableTimeSync(enable) {
     this.enableTimeSync = enable;
@@ -174,17 +184,50 @@ class Client {
 
   /**
    * Request events based on the provided query parameters.
+   *
+   * The `query.flags` field uses bitmask values similar to an enum:
+   *   0 = None
+   *   1 = NewestFirst
+   *   2 = TimeRangeBeginExclusive
+   *   4 = TimeRangeEndExclusive
+   *   8 = UseLogStampForTimeRange
+   *
+   * The `query.senderConditions` field can be used to filter by event sender (Source).
+   * The `query.dataConditions` field can be used to filter by data fields (key-value patterns).
+   *
+   * For additional information:
+   *   https://cdpstudio.com/manual/cdp/cdplogger/eventlogreader.html#Flags-enum
+   *   https://cdpstudio.com/manual/cdp/cdplogger/eventlogreader.html#cdp-event-code-flags
+   *
+   * We also support mapping the `evt.code` field to a human-readable string
+   * with `getEventCodeDescription()`.
+   *
    * @param {Object} query - An object matching the EventQuery schema.
-   * For example:
+   * Example:
    * {
    *   timeRangeBegin: 1620000000,
-   *   timeRangeEnd: 1620003600,
-   *   codeMask: 0,
-   *   limit: 100,
-   *   offset: 0,
-   *   flags: 1
+   *   timeRangeEnd:   1620003600,
+   *   codeMask:       0xFFFFFFFF,
+   *   limit:          100,
+   *   offset:         0,
+   *   flags:          1, // e.g. 'NewestFirst'
+   *
+   *   // Example conditions:
+   *   senderConditions: {
+   *     conditions: [
+   *       { value: "*TemperatureSensor*", type: 1 } // 1 = Wildcard
+   *     ]
+   *   },
+   *   dataConditions: {
+   *     pressure: {
+   *       conditions: [
+   *         { value: "high", type: 0 } // 0 = Exact
+   *       ]
+   *     }
+   *   }
    * }
-   * @returns {Promise<Array>} Resolves with an array of events.
+   *
+   * @returns {Promise<Array>} Resolves with an array of events (each event includes a 'codeDescription').
    */
   requestEvents(query) {
     this._timeRequest();
@@ -202,9 +245,39 @@ class Client {
   _sendEventsRequest(requestId, query) {
     const container = Container.create();
     container.messageType = Container.Type.eEventsRequest;
-    container.eventsRequest = { requestId: requestId, query: query };
+    container.eventsRequest = { requestId, query };
     const buffer = Container.encode(container).finish();
     this.ws.send(buffer);
+  }
+
+  /**
+   * Converts a numeric CDP event code into a descriptive string.
+   * Multiple flags can be set simultaneously, so we combine them.
+   *
+   * Common codes (from the docs):
+   *   0x1        = AlarmSet
+   *   0x2        = AlarmClr
+   *   0x4        = AlarmAck
+   *   0x40       = AlarmReprise
+   *   0x100      = SourceObjectUnavailable
+   *   0x40000000 = NodeBoot
+   *
+   * @param {number} code - The event code from an eEventsResponse
+   * @returns {string} - A human-readable combination of flags
+   */
+  getEventCodeDescription(code) {
+    const flags = [];
+    if (code & 0x1) flags.push("AlarmSet");
+    if (code & 0x2) flags.push("AlarmClr");
+    if (code & 0x4) flags.push("AlarmAck");
+    if (code & 0x40) flags.push("AlarmReprise");
+    if (code & 0x100) flags.push("SourceObjectUnavailable");
+    if (code & 0x40000000) flags.push("NodeBoot");
+
+    if (flags.length === 0) {
+      flags.push("None");
+    }
+    return flags.join(" + ");
   }
 
   _handleMessage(ws, message) {
@@ -292,13 +365,13 @@ class Client {
       }
 
       case Container.Type.eSignalDataResponse: {
-        let dataPoints = [];
+        const dataPoints = [];
         let index = 0;
         for (const row of data.signalDataResponse.row) {
           if (this.enableTimeSync) {
             data.signalDataResponse.criterion[index] += this.timeDiff;
           }
-          let signalNames = [];
+          const signalNames = [];
           for (const signalId of row.signalId) {
             signalNames.push(this.idToName[signalId]);
           }
@@ -310,7 +383,7 @@ class Client {
           );
           dataPoints.push({
             timestamp: data.signalDataResponse.criterion[index],
-            value: value
+            value
           });
           index++;
         }
@@ -323,6 +396,13 @@ class Client {
       }
 
       case Container.Type.eEventsResponse: {
+        // Optionally enrich each event with a human-readable code description:
+        if (data.eventsResponse.events && data.eventsResponse.events.length > 0) {
+          data.eventsResponse.events.forEach(evt => {
+            evt.codeDescription = this.getEventCodeDescription(evt.code);
+          });
+        }
+
         if (this.storedPromises[data.eventsResponse.requestId]) {
           const { resolve } = this.storedPromises[data.eventsResponse.requestId];
           delete this.storedPromises[data.eventsResponse.requestId];
@@ -452,11 +532,11 @@ class Client {
     });
     return promise;
   }
-  
+
   _sendTimeRequest(requestId) {
     const container = Container.create();
     container.messageType = Container.Type.eTimeRequest;
-    container.timeRequest = { requestId: requestId };
+    container.timeRequest = { requestId };
     const buffer = Container.encode(container).finish();
     this.ws.send(buffer);
   }
@@ -484,7 +564,7 @@ class Client {
   _sendLoggedNodesRequest(requestId) {
     const container = Container.create();
     container.messageType = Container.Type.eSignalInfoRequest;
-    container.signalInfoRequest = { requestId: requestId };
+    container.signalInfoRequest = { requestId };
     const buffer = Container.encode(container).finish();
     this.ws.send(buffer);
   }
@@ -492,7 +572,7 @@ class Client {
   _sendLogLimitsRequest(requestId) {
     const container = Container.create();
     container.messageType = Container.Type.eCriterionLimitsRequest;
-    container.criterionLimitsRequest = { requestId: requestId };
+    container.criterionLimitsRequest = { requestId };
     const buffer = Container.encode(container).finish();
     this.ws.send(buffer);
   }
@@ -545,7 +625,7 @@ class Client {
     const container = Container.create();
     container.messageType = Container.Type.eSignalDataRequest;
     container.signalDataRequest = {
-      requestId: requestId,
+      requestId,
       signalId: nodeIds,
       numOfDatapoints: noOfDataPoints,
       criterionMin: this.enableTimeSync ? (startS - this.timeDiff) : startS,
@@ -558,7 +638,7 @@ class Client {
   _sendApiVersionRequest(requestId) {
     const container = Container.create();
     container.messageType = Container.Type.eVersionRequest;
-    container.versionRequest = { requestId: requestId };
+    container.versionRequest = { requestId };
     const buffer = Container.encode(container).finish();
     this.ws.send(buffer);
   }
