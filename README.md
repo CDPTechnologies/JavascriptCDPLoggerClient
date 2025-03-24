@@ -24,7 +24,7 @@ npm test
 To test the time sync functionality using simulated response:
 
 ```bash
-node test/timeSync.test.js
+node test/testTimeSync.js
 ```
 
 
