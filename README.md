@@ -39,13 +39,13 @@ https://cdpstudio.com/manual/cdp/cdplogger/cdplogger-configuration-example.html
 2. Run the index.js file from the command line:
 
 ```bash
-node index.js
+node examples/index.js
 ```
 
 For usage related to events run:
 
 ```bash
-node event.js
+node examples/event.js
 ```
 
 

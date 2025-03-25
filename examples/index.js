@@ -2,7 +2,7 @@
 // Example demonstration including an events query for a specific time range (UTC 9:40)
 
 global.WebSocket = require('ws');
-const Client = require('./client');
+const Client = require('../client');
 
 // Print the node information (name, routing, and tags)
 function printLoggedNodes() {

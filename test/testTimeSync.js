@@ -13,8 +13,6 @@ global.WebSocket = class {
 };
 
 // --- Capture Request IDs for time sync vs. API calls ---
-// We override _getRequestId so that for each API call the first call is used for
-// the time sync update and the second call is used for the actual API request.
 let capturedTimeSyncRequestId = null;
 let capturedApiRequestId = null;
 const originalGetRequestId = Client.prototype._getRequestId;
@@ -46,12 +44,16 @@ async function runThrough(methodName, callFunc, simulateResponse) {
   callFunc();
   // Allow the _getRequestId calls to occur.
   await new Promise(resolve => setTimeout(resolve, 50));
+
   // Simulate two responses: first for the time sync update, then for the API response.
-  if (simulateResponse) simulateResponse(capturedTimeSyncRequestId, capturedApiRequestId);
+  if (simulateResponse) {
+    simulateResponse(capturedTimeSyncRequestId, capturedApiRequestId);
+  }
+
   // Wait for responses to be processed.
   await new Promise(resolve => setTimeout(resolve, 300));
   console.log(`${methodName} -> timeDiff: ${client.timeDiff.toFixed(6)} sec`);
-  
+
   // Now disable time sync.
   client.storedPromises = {};
   client.setEnableTimeSync(false);
@@ -62,9 +64,13 @@ async function runThrough(methodName, callFunc, simulateResponse) {
   capturedTimeSyncRequestId = null;
   capturedApiRequestId = null;
   callFunc();
+
   // When time sync is disabled, do NOT simulate a time sync response.
   await new Promise(resolve => setTimeout(resolve, 300));
-  console.log(`${methodName} -> timeDiff: ${client.timeDiff.toFixed(6)} sec (should remain ${previousTimeDiff.toFixed(6)} sec)`);
+  console.log(
+    `${methodName} -> timeDiff: ${client.timeDiff.toFixed(6)} sec (should remain ${previousTimeDiff.toFixed(6)} sec)`
+  );
+
   // Re-enable time sync for subsequent tests.
   client.setEnableTimeSync(true);
 }
@@ -120,6 +126,7 @@ async function runTest() {
         timeResponse: { requestId: timeSyncId, timestamp: Date.now() * 1e6 }
       };
       client._parseMessage(timeResponse);
+
       // Simulate API version response.
       const apiResponse = fakeData.createApiVersionResponse(apiId);
       client._parseMessage(apiResponse);
@@ -135,6 +142,7 @@ async function runTest() {
         timeResponse: { requestId: timeSyncId, timestamp: Date.now() * 1e6 }
       };
       client._parseMessage(timeResponse);
+
       const apiResponse = fakeData.createLogLimitsResponse(apiId);
       client._parseMessage(apiResponse);
     }
@@ -149,6 +157,7 @@ async function runTest() {
         timeResponse: { requestId: timeSyncId, timestamp: Date.now() * 1e6 }
       };
       client._parseMessage(timeResponse);
+
       const apiResponse = fakeData.createLoggedNodesResponse(apiId);
       client._parseMessage(apiResponse);
     }
@@ -169,6 +178,7 @@ async function runTest() {
         timeResponse: { requestId: timeSyncId, timestamp: Date.now() * 1e6 }
       };
       client._parseMessage(timeResponse);
+
       const apiResponse = fakeData.createDataPointResponse(apiId);
       client._parseMessage(apiResponse);
     }
@@ -179,4 +189,13 @@ async function runTest() {
 }
 
 let client;
-runTest().catch(console.error);
+
+runTest()
+  .then(() => {
+    console.log("All tests passed successfully.");
+    process.exit(0);
+  })
+  .catch(err => {
+    console.error("Test run failed with error:", err);
+    process.exit(1);
+  });

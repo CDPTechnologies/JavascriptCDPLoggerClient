@@ -236,28 +236,94 @@ describe('ClientTester', () => {
     client._parseMessage(response);
   });
 
-  // Added test for events
-  test('test_events_request', done => {
+  // Updated test for events with conditions
+  test('test_events_request_with_conditions', () => {
     client.isOpen = true;
     client._sendTimeRequest = jest.fn();
     client._sendEventsRequest = jest.fn();
-    client.requestEvents({ timeRangeBegin: 1000, timeRangeEnd: 2000, codeMask: 0, limit: 10, offset: 0, flags: 0 })
+
+    const queryWithConditions = {
+      timeRangeBegin: 1000,
+      timeRangeEnd: 2000,
+      codeMask: 0,
+      limit: 10,
+      offset: 0,
+      flags: 0,
+      senderConditions: {
+        conditions: [
+          { value: "*TemperatureSensor*", type: 1 } // Wildcard
+        ]
+      },
+      dataConditions: {
+        pressure: {
+          conditions: [
+            { value: "high", type: 0 } // Exact
+          ]
+        }
+      }
+    };
+
+    client.requestEvents(queryWithConditions);
+    // Expect the _updateTimeDiff from _timeRequest to have been called first
+    // Then _sendEventsRequest should be called with request id 1 (not 0).
+    expect(client._sendTimeRequest).toHaveBeenCalled();
+    expect(client._sendEventsRequest).toHaveBeenCalledWith(
+      1, // adjusted expectation
+      queryWithConditions
+    );
+  });
+
+  // Updated test for events with no known flags (code=0 should yield codeDescription "None")
+  test('test_event_code_description_none', done => {
+    client.isOpen = true;
+    client.requestEvents({})
       .then(events => {
-        expect(events).toBeDefined();
-        expect(events.length).toBe(1);
-        expect(events[0].sender).toBe("TestSender");
-        expect(events[0].data.key).toBe("value");
-        expect(events[0].timestampSec).toBeCloseTo(1500);
+        expect(events).toHaveLength(1);
+        expect(events[0].code).toBe(0);
+        expect(events[0].codeDescription).toBe("None");
         done();
       })
       .catch(done.fail);
-    // Simulate an events response.
+  
+    // Adjust the response requestId to match the expected request id (should be 1)
+    const response = {
+      messageType: fakeData.Container.Type.eEventsResponse,
+      eventsResponse: {
+        requestId: 1, // updated from 0 to 1
+        events: [
+          {
+            sender: "Test",
+            data: {},
+            timestampSec: 1234,
+            id: 999,
+            code: 0,
+            status: 0,
+            logstampSec: 1234
+          }
+        ]
+      }
+    };
+    client._parseMessage(response);
+  });
+
+  test('test_event_code_description_multiple_flags', done => {
+    client.isOpen = true;
+    client.requestEvents({ timeRangeBegin: 1000, timeRangeEnd: 2000, codeMask: 0, limit: 10, offset: 0, flags: 0 })
+      .then(events => {
+        expect(events).toHaveLength(1);
+        // code = 0x5 => (AlarmSet + AlarmAck)
+        expect(events[0].code).toBe(0x5);
+        expect(events[0].codeDescription).toBe("AlarmSet + AlarmAck");
+        done();
+      })
+      .catch(done.fail);
+    // Simulate a multi-flag code: 0x5 => AlarmSet (0x1) + AlarmAck (0x4).
     const response = {
       messageType: fakeData.Container.Type.eEventsResponse,
       eventsResponse: {
         requestId: 1,
         events: [
-          { sender: "TestSender", data: { key: "value" }, timestampSec: 1500, id: 42, code: 100, status: 1, logstampSec: 1500 }
+          { sender: "MultiFlagSensor", data: { key: "value" }, timestampSec: 1500, id: 42, code: 0x5, status: 1, logstampSec: 1500 }
         ]
       }
     };
