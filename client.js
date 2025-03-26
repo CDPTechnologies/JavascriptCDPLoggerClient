@@ -207,6 +207,10 @@ class Client {
    *   2 = TimeRangeBeginExclusive  
    *   4 = TimeRangeEndExclusive  
    *   8 = UseLogStampForTimeRange  
+   * 
+   *      For additional information:
+   *   https://cdpstudio.com/manual/cdp/cdp2sql/logmanager-eventquery.html#Flags-enum
+   *   https://cdpstudio.com/manual/cdp/cdplogger/eventlogreader.html#cdp-event-code-flags
    *
    * In addition, the user can simply supply the following properties in the query object:
    *
@@ -217,9 +221,6 @@ class Client {
    *       - An object (or array of objects) with properties:
    *           - `value`: the string value to match,
    *           - `matchType`: either `"exact"` (default) or `"wildcard"`.
-   *
-   * The helper method `_buildEventQuery(query)` converts this simple plain object into a proper
-   * `DBMessaging.Protobuf.EventQuery` message.
    *
    * enum EventQuery::MatchType:
    *   - Exact (0): The string must match exactly.
