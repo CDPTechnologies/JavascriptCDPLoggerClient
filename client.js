@@ -242,9 +242,9 @@ class Client {
     const requestId = this._getRequestId();
     // Convert the simple query into a proper EventQuery message.
     const eventQuery = this._buildEventQuery(query);
-    
 
-    
+
+
     if (!this.isOpen) {
       this.queuedRequests[requestId] = { type: "events", query: eventQuery };
     } else {
@@ -305,7 +305,7 @@ class Client {
       for (const key in query.dataConditions) {
         const val = query.dataConditions[key];
         const conditions = [];
-        
+
         if (Array.isArray(val)) {
           for (const item of val) {
             conditions.push({
@@ -319,7 +319,7 @@ class Client {
             type: MatchType.Exact
           });
         }
-        
+
         // Store without any table qualification
         dataConds[key] = { conditions };
       }
@@ -328,10 +328,10 @@ class Client {
 
     return EventQuery.create(baseQuery);
   }
-  
 
-  
-  
+
+
+
 
   /**
    * Converts a numeric CDP event code into a descriptive string.
@@ -362,6 +362,51 @@ class Client {
     }
     return flags.join(" + ");
   }
+
+  /**
+ * Returns a human‐readable string for a given event code.
+ *
+ * @param {number} code - The numeric event code.
+ * @returns {string} - The corresponding event code string.
+ */
+  getEventCodeString(code) {
+    // Return empty string if eventCode is zero
+    if (code === 0) return "";
+
+    // Define the flag values (adjust these constants if needed)
+    const EventCodeFlags = {
+      AlarmSet: 0x1,
+      AlarmClr: 0x2,
+      AlarmAck: 0x4,
+      AlarmReprise: 0x40
+    };
+
+    // Check for specific combinations first
+    if (code === EventCodeFlags.AlarmSet) return "AlarmSet";
+    if (code === EventCodeFlags.AlarmClr) return "AlarmClear";
+    if (code === EventCodeFlags.AlarmAck) return "Ack";
+    if (code === EventCodeFlags.AlarmReprise) return "Reprise";
+    if (code === (EventCodeFlags.AlarmReprise | EventCodeFlags.AlarmSet))
+      return "RepriseAlarmSet";
+    if (code === (EventCodeFlags.AlarmReprise | EventCodeFlags.AlarmClr))
+      return "RepriseAlarmClear";
+    if (code === (EventCodeFlags.AlarmReprise | EventCodeFlags.AlarmAck))
+      return "RepriseAck";
+
+    // Otherwise, combine the flag strings based on which bits are set.
+    let s = "";
+    if (code & EventCodeFlags.AlarmReprise)
+      s += (s ? "+" : "") + "Reprise";
+    if (code & EventCodeFlags.AlarmSet)
+      s += (s ? "+" : "") + "AlarmSet";
+    if (code & EventCodeFlags.AlarmClr)
+      s += (s ? "+" : "") + "AlarmClear";
+    if (code & EventCodeFlags.AlarmAck)
+      s += (s ? "+" : "") + "Ack";
+
+    return s;
+  }
+
 
   _handleMessage(ws, message) {
     const data = Container.decode(new Uint8Array(message));
