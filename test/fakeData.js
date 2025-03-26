@@ -39,7 +39,7 @@ function createApiVersionErrorResponse() {
 
 function createLogLimitsResponse() {
   return {
-    messageType: Container.Type.eCriterionLimitsResponse, // value 6
+    messageType: Container.Type.eCriterionLimitsResponse,
     criterionLimitsResponse: {
       requestId: 1,
       criterionMin: 1529497537.61,
@@ -101,6 +101,62 @@ function createErrorResponse() {
   };
 }
 
+
+function createRealisticEventsResponse(requestId = 1) {
+  return {
+    messageType: Container.Type.eEventsResponse,
+    eventsResponse: {
+      requestId,
+      events: [
+        {
+          sender: "CPDLoggerDemoApp.InvalidLicense",
+          data: {
+            Text: "Invalid or missing feature license detected."
+          },
+          timestampSec: 1740284241, // ~2025-03-26 08:37:21 UTC
+          id: 101,
+          code: 0x1,  // AlarmSet
+          status: 1,  // Error
+          logstampSec: 1740284241
+        },
+        {
+          sender: "CDPLoggerDemoApp.CPDEventNotification",
+          data: {
+            Text: "CDP event notice"
+          },
+          timestampSec: 1740284167, // ~2025-03-26 08:36:07
+          id: 102,
+          code: 0,   // None
+          status: 3, // Notify
+          logstampSec: 1740284167
+        },
+        {
+          sender: "CPDLoggerDemoApp",
+          data: {
+            Text: "A component is suspended"
+          },
+          timestampSec: 1740284145, // ~2025-03-26 08:35:45
+          id: 103,
+          code: 0x1, // AlarmSet
+          status: 1, // Error
+          logstampSec: 1740284145
+        },
+        {
+          sender: "CPDLoggerDemoApp",
+          data: {
+            Text: "Component was suspended"
+          },
+          timestampSec: 1740284090, // ~2025-03-26 08:34:50
+          id: 104,
+          code: 0,   // None
+          status: 2, // Warning
+          logstampSec: 1740284090
+        }
+      ]
+    }
+  };
+}
+
 module.exports = {
   createApiVersionResponse,
   createApiVersionErrorResponse,
@@ -108,5 +164,6 @@ module.exports = {
   createLoggedNodesResponse,
   createDataPointResponse,
   createErrorResponse,
+  createRealisticEventsResponse, // Export our new function
   Container
 };
