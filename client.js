@@ -1,16 +1,22 @@
-// client.js
 const WebSocket = require('ws');
 const root = require('./generated/containerPb.js');
 const Container = root.DBMessaging.Protobuf.Container;
 const CDPValueType = root.ICD.Protobuf.CDPValueType;
 
 /**
- * A client for interacting with CDP Logger or LogServer via WebSocket.
+ * A client for interacting with a CDP Logger or LogServer via WebSocket.
+ * 
+ * This client handles:
+ * - Automatic reconnection (if enabled)
+ * - Requesting and parsing responses for version, logged nodes, log limits, data points, and events
+ * - Time synchronization between the client and the server
  */
 class Client {
   /**
-   * @param {string} endpoint - The logger endpoint (e.g. "127.0.0.1:17000" or "ws://127.0.0.1:17000")
-   * @param {boolean} [autoReconnect=true] - Automatically reconnect if the connection is lost
+   * Create a new Client instance to communicate with the logger.
+   *
+   * @param {string} endpoint - The logger endpoint (e.g. "127.0.0.1:17000" or "ws://127.0.0.1:17000").
+   * @param {boolean} [autoReconnect=true] - Whether to automatically reconnect if the connection is lost.
    */
   constructor(endpoint, autoReconnect = true) {
     // If endpoint does not start with "ws://" or "wss://", prepend "ws://"
@@ -44,12 +50,14 @@ class Client {
   }
 
   /**
-   * Enable or disable time synchronization.
+   * Enable or disable time synchronization with the server.
    *
-   * Note:
-   * Time sync is triggered on-demand (e.g., with the next request) or after a timeout.
-   * Re-enabling time sync will automatically sync on the next operation.
-   * For immediate sync, call `_updateTimeDiff()` explicitly.
+   * When enabled, the client automatically requests and calculates the time offset
+   * (`timeDiff`) between the client and server to align timestamps. This can help
+   * ensure data queries (e.g., requestDataPoints, requestEvents) are aligned with
+   * the server's notion of time. Re-enabling time sync triggers a new offset
+   * calculation on the next request or after a timeout. For an immediate sync,
+   * call `_updateTimeDiff()` explicitly.
    *
    * @param {boolean} enable - True to enable, false to disable time sync.
    */
@@ -63,6 +71,264 @@ class Client {
       this.storedPromises = {};
     }
   }
+
+  /**
+   * Disconnect from the server, closing the WebSocket connection.
+   *
+   * This also disables auto-reconnect and clears any queued or pending requests.
+   * After calling `disconnect()`, you can create a new Client instance to 
+   * re-establish a connection.
+   */
+  disconnect() {
+    this.autoReconnect = false;
+    this._cleanupQueuedRequests();
+    this.isOpen = false;
+    if (this.ws) {
+      this.ws.close();
+    }
+  }
+
+  // --- Public API methods ---
+
+  /**
+   * Request the API version from the connected CDP Logger or LogServer.
+   * 
+   * In CDP Studio, this corresponds to the version of the CDP runtime 
+   * or the logger server that you are connecting to. The version can be used 
+   * to ensure compatibility with certain features.
+   *
+   * @returns {Promise<string>} A promise that resolves with the version string
+   *   (e.g., "4.5.2"). If the version is below 3.0, the promise is rejected with
+   *   an error indicating an incompatible version.
+   */
+  requestApiVersion() {
+    this._timeRequest();
+    const requestId = this._getRequestId();
+    if (!this.isOpen) {
+      this.queuedRequests[requestId] = "api_version";
+    } else {
+      this._sendApiVersionRequest(requestId);
+    }
+    return new Promise((resolve, reject) => {
+      this.storedPromises[requestId] = { resolve, reject };
+    });
+  }
+
+  /**
+   * Request the list of logged nodes.
+   *
+   * In CDP Studio, this corresponds to the "LoggedValues" table of the 
+   * CDPLogger (or LogServer) component. The returned list includes node 
+   * names, paths, and any associated tags that might be assigned to 
+   * those nodes.
+   *
+   * @returns {Promise<Array>} A promise that resolves with an array of 
+   *   node objects. Each object includes:
+   *   - `name`    (string): The node name
+   *   - `routing` (string): The node path
+   *   - `tags`    (object): Optional key/value pairs providing additional 
+   *       node metadata
+   */
+  requestLoggedNodes() {
+    this._timeRequest();
+    const requestId = this._getRequestId();
+    if (!this.isOpen) {
+      this.queuedRequests[requestId] = "logged_nodes";
+    } else {
+      this._sendLoggedNodesRequest(requestId);
+    }
+    return new Promise((resolve, reject) => {
+      this.storedPromises[requestId] = { resolve, reject };
+    });
+  }
+
+  /**
+   * Request the log limits (start and end times of available data).
+   *
+   * In CDP Studio, this corresponds to the earliest and latest times 
+   * for which log data is available in the CDPLogger (or LogServer).
+   *
+   * @returns {Promise<Object>} A promise that resolves with an object
+   *   containing:
+   *   - `startS` (number): The earliest available timestamp (in seconds).
+   *   - `endS`   (number): The latest available timestamp (in seconds).
+   */
+  requestLogLimits() {
+    this._timeRequest();
+    const requestId = this._getRequestId();
+    if (!this.isOpen) {
+      this.queuedRequests[requestId] = "log_limits";
+    } else {
+      this._sendLogLimitsRequest(requestId);
+    }
+    return new Promise((resolve, reject) => {
+      this.storedPromises[requestId] = { resolve, reject };
+    });
+  }
+
+  /**
+   * Request data points for the specified node names over a given time range.
+   *
+   * In CDP Studio, this retrieves time-series data from the logged nodes
+   * (CDP signals) in the specified range. The number of data points is
+   * adjustable, allowing for either raw or decimated data.
+   *
+   * @param {Array<string>} nodeNames - The names of the nodes/signals to retrieve.
+   * @param {number} startS - The start time (in seconds since epoch).
+   * @param {number} endS - The end time (in seconds since epoch).
+   * @param {number} noOfDataPoints - The maximum number of data points to retrieve.
+   * @returns {Promise<Array>} A promise that resolves with an array of objects,
+   *   where each object has:
+   *   - `timestamp` (number): The time (in seconds) for the data row.
+   *   - `value` (object): A key-value mapping of node names to an object with
+   *       `min`, `max`, and `last` properties representing the node's values
+   *       at that timestamp.
+   */
+  requestDataPoints(nodeNames, startS, endS, noOfDataPoints) {
+    this._timeRequest();
+    const requestId = this._getRequestId();
+    const promise = new Promise((resolve, reject) => {
+      this.storedPromises[requestId] = { resolve, reject };
+    });
+    if (!this.isOpen) {
+      this.queuedRequests[requestId] = ["node_values", nodeNames, startS, endS, noOfDataPoints];
+    } else {
+      this._reqDataPoints(nodeNames, startS, endS, noOfDataPoints, requestId);
+    }
+    return promise;
+  }
+
+  /**
+   * Request events based on the provided query parameters.
+   *
+   * In CDP Studio, this corresponds to event log queries for the
+   * CDPLogger (or LogServer). The query parameters allow filtering by
+   * sender, data fields, code masks, and time ranges, among others.
+   *
+   * The `query.flags` field uses bitmask values similar to an enum:
+   *   0 = None  
+   *   1 = NewestFirst  
+   *   2 = TimeRangeBeginExclusive  
+   *   4 = TimeRangeEndExclusive  
+   *   8 = UseLogStampForTimeRange  
+   * 
+   *   For additional information:
+   *   https://cdpstudio.com/manual/cdp/cdp2sql/logmanager-eventquery.html#Flags-enum
+   *   https://cdpstudio.com/manual/cdp/cdplogger/eventlogreader.html#cdp-event-code-flags
+   *
+   * Example usage:
+   *   // Filter for events with sender exactly "CDPLoggerDemoApp.InvalidLicense":
+   *   { senderConditions: ["CDPLoggerDemoApp.InvalidLicense"] }
+   *
+   *   // Filter for events where the "Text" data field equals "Invalid or missing feature license detected.":
+   *   { dataConditions: { "Text": "Invalid or missing feature license detected." } }
+   *
+   * @param {Object} query - A simple plain object representing the EventQuery.
+   * @returns {Promise<Array>} Resolves with an array of events (each event 
+   *   includes a `codeDescription` which provides a textual representation 
+   *   of the event code).
+   */
+  requestEvents(query) {
+    this._timeRequest();
+    const requestId = this._getRequestId();
+    // Convert the simple query into a proper EventQuery message.
+    const eventQuery = this._buildEventQuery(query);
+
+    if (!this.isOpen) {
+      this.queuedRequests[requestId] = { type: "events", query: eventQuery };
+    } else {
+      this._sendEventsRequest(requestId, eventQuery);
+    }
+    return new Promise((resolve, reject) => {
+      this.storedPromises[requestId] = { resolve, reject };
+    });
+  }
+
+  /**
+   * Converts a numeric CDP event code into a descriptive string,
+   * combining multiple flags if needed.
+   *
+   * Common codes (from the docs):
+   *   0x1        = AlarmSet
+   *   0x2        = AlarmClr
+   *   0x4        = AlarmAck
+   *   0x40       = AlarmReprise
+   *   0x100      = SourceObjectUnavailable
+   *   0x40000000 = NodeBoot
+   *
+   * @param {number} code - The event code from an eEventsResponse.
+   * @returns {string} - A human-readable combination of flags, 
+   *   such as "AlarmSet + SourceObjectUnavailable".
+   */
+  getEventCodeDescription(code) {
+    const flags = [];
+    if (code & 0x1) flags.push("AlarmSet");
+    if (code & 0x2) flags.push("AlarmClr");
+    if (code & 0x4) flags.push("AlarmAck");
+    if (code & 0x40) flags.push("AlarmReprise");
+    if (code & 0x100) flags.push("SourceObjectUnavailable");
+    if (code & 0x40000000) flags.push("NodeBoot");
+
+    if (flags.length === 0) {
+      flags.push("None");
+    }
+    return flags.join(" + ");
+  }
+
+/**
+ * Returns a human‐readable string for a given event code.
+ * If multiple flags are set, it attempts to identify known
+ * combinations; otherwise, it combines them with a plus sign.
+ *
+ * @param {number} code - The numeric event code.
+ * @returns {string} - The corresponding event code string.
+ */
+getEventCodeString(code) {
+  // Return empty string if eventCode is zero
+  if (code === 0) return "";
+
+  // Define the flag values
+  const EventCodeFlags = {
+    AlarmSet: 0x1,
+    AlarmClr: 0x2,
+    AlarmAck: 0x4,
+    AlarmReprise: 0x40,
+    SourceObjectUnavailable: 0x100,
+    NodeBoot: 0x40000000
+  };
+
+  // Check for specific single-flag codes or two-flag combos
+  if (code === EventCodeFlags.AlarmSet) return "AlarmSet";
+  if (code === EventCodeFlags.AlarmClr) return "AlarmClear";
+  if (code === EventCodeFlags.AlarmAck) return "Ack";
+  if (code === EventCodeFlags.AlarmReprise) return "Reprise";
+  if (code === (EventCodeFlags.AlarmReprise | EventCodeFlags.AlarmSet))
+    return "RepriseAlarmSet";
+  if (code === (EventCodeFlags.AlarmReprise | EventCodeFlags.AlarmClr))
+    return "RepriseAlarmClear";
+  if (code === (EventCodeFlags.AlarmReprise | EventCodeFlags.AlarmAck))
+    return "RepriseAck";
+
+  // Otherwise, combine the flag strings based on which bits are set
+  let s = "";
+  if (code & EventCodeFlags.AlarmReprise)
+    s += (s ? "+" : "") + "Reprise";
+  if (code & EventCodeFlags.AlarmSet)
+    s += (s ? "+" : "") + "AlarmSet";
+  if (code & EventCodeFlags.AlarmClr)
+    s += (s ? "+" : "") + "AlarmClear";
+  if (code & EventCodeFlags.AlarmAck)
+    s += (s ? "+" : "") + "Ack";
+  if (code & EventCodeFlags.NodeBoot)
+    s += (s ? "+" : "") + "EventNodeBoot";
+  if (code & EventCodeFlags.SourceObjectUnavailable)
+    s += (s ? "+" : "") + "SourceObjectUnavailable";
+
+  return s;
+}
+
+
+  // --- Internal methods ---
 
   _connect(url) {
     const ws = new WebSocket(url);
@@ -108,15 +374,6 @@ class Client {
     }
   }
 
-  disconnect() {
-    this.autoReconnect = false;
-    this._cleanupQueuedRequests();
-    this.isOpen = false;
-    if (this.ws) {
-      this.ws.close();
-    }
-  }
-
   _cleanupQueuedRequests() {
     for (const key in this.storedPromises) {
       this.storedPromises[key].reject(new Error("Connection was closed"));
@@ -124,290 +381,6 @@ class Client {
     this.storedPromises = {};
     this.queuedRequests = {};
   }
-
-  // --- Public API methods ---
-
-  /**
-   * Request the API version.
-   */
-  requestApiVersion() {
-    this._timeRequest();
-    const requestId = this._getRequestId();
-    if (!this.isOpen) {
-      this.queuedRequests[requestId] = "api_version";
-    } else {
-      this._sendApiVersionRequest(requestId);
-    }
-    return new Promise((resolve, reject) => {
-      this.storedPromises[requestId] = { resolve, reject };
-    });
-  }
-
-  /**
-   * Request the list of logged nodes.
-   */
-  requestLoggedNodes() {
-    this._timeRequest();
-    const requestId = this._getRequestId();
-    if (!this.isOpen) {
-      this.queuedRequests[requestId] = "logged_nodes";
-    } else {
-      this._sendLoggedNodesRequest(requestId);
-    }
-    return new Promise((resolve, reject) => {
-      this.storedPromises[requestId] = { resolve, reject };
-    });
-  }
-
-  /**
-   * Request the log limits.
-   */
-  requestLogLimits() {
-    this._timeRequest();
-    const requestId = this._getRequestId();
-    if (!this.isOpen) {
-      this.queuedRequests[requestId] = "log_limits";
-    } else {
-      this._sendLogLimitsRequest(requestId);
-    }
-    return new Promise((resolve, reject) => {
-      this.storedPromises[requestId] = { resolve, reject };
-    });
-  }
-
-  /**
-   * Request data points for given node names and time range.
-   * @param {Array<string>} nodeNames
-   * @param {number} startS
-   * @param {number} endS
-   * @param {number} noOfDataPoints
-   * @returns {Promise<Array>}
-   */
-  requestDataPoints(nodeNames, startS, endS, noOfDataPoints) {
-    this._timeRequest();
-    const requestId = this._getRequestId();
-    const promise = new Promise((resolve, reject) => {
-      this.storedPromises[requestId] = { resolve, reject };
-    });
-    if (!this.isOpen) {
-      this.queuedRequests[requestId] = ["node_values", nodeNames, startS, endS, noOfDataPoints];
-    } else {
-      this._reqDataPoints(nodeNames, startS, endS, noOfDataPoints, requestId);
-    }
-    return promise;
-  }
-
-  /**
-   * Request events based on the provided query parameters.
-   *
-   * The `query.flags` field uses bitmask values similar to an enum:
-   *
-   *   0 = None  
-   *   1 = NewestFirst  
-   *   2 = TimeRangeBeginExclusive  
-   *   4 = TimeRangeEndExclusive  
-   *   8 = UseLogStampForTimeRange  
-   * 
-   *      For additional information:
-   *   https://cdpstudio.com/manual/cdp/cdp2sql/logmanager-eventquery.html#Flags-enum
-   *   https://cdpstudio.com/manual/cdp/cdplogger/eventlogreader.html#cdp-event-code-flags
-   *
-   * In addition, the user can simply supply the following properties in the query object:
-   *
-   *   - **senderConditions**: An array of sender strings (exact matches by default).
-   *   - **dataConditions**: An object where each key is a data field name and the value can be:
-   *       - A string (defaults to an exact match),
-   *       - An array of strings,
-   *       - An object (or array of objects) with properties:
-   *           - `value`: the string value to match,
-   *           - `matchType`: either `"exact"` (default) or `"wildcard"`.
-   *
-   * enum EventQuery::MatchType:
-   *   - Exact (0): The string must match exactly.
-   *   - Wildcard (1): The string may contain wildcards.
-   *
-   * Example usage:
-   *
-   *   // Filter for events with sender exactly "CDPLoggerDemoApp.InvalidLicense":
-   *   { senderConditions: ["CDPLoggerDemoApp.InvalidLicense"] }
-   *
-   *   // Filter for events where the "Text" data field equals "Invalid or missing feature license detected.":
-   *   { dataConditions: { "Text": "Invalid or missing feature license detected." } }
-   *
-   *
-   * @param {Object} query - A simple plain object representing the EventQuery.
-   * @returns {Promise<Array>} Resolves with an array of events (each event includes a 'codeDescription').
-   */
-  requestEvents(query) {
-    this._timeRequest();
-    const requestId = this._getRequestId();
-    // Convert the simple query into a proper EventQuery message.
-    const eventQuery = this._buildEventQuery(query);
-
-
-
-    if (!this.isOpen) {
-      this.queuedRequests[requestId] = { type: "events", query: eventQuery };
-    } else {
-      this._sendEventsRequest(requestId, eventQuery);
-    }
-    return new Promise((resolve, reject) => {
-      this.storedPromises[requestId] = { resolve, reject };
-    });
-  }
-
-  // --- Internal methods ---
-
-  _sendEventsRequest(requestId, query) {
-    const container = Container.create();
-    container.messageType = Container.Type.eEventsRequest;
-    container.eventsRequest = { requestId, query };
-    const buffer = Container.encode(container).finish();
-    this.ws.send(buffer);
-  }
-
-  /**
-   * Helper method to build a proper EventQuery message from a simple plain object.
-   *
-   *
-   *
-   *
-   * @param {Object} query - The simple plain object query.
-   * @returns {DBMessaging.Protobuf.EventQuery} - The built EventQuery message.
-   */
-  _buildEventQuery(query) {
-    const root = require('./generated/containerPb.js');
-    const { EventQuery } = root.DBMessaging.Protobuf;
-    const { MatchType } = EventQuery;
-
-    // Create base query with primitive fields
-    const baseQuery = {
-      timeRangeBegin: query.timeRangeBegin || 0,
-      timeRangeEnd: query.timeRangeEnd || Math.floor(Date.now() / 1000),
-      codeMask: query.codeMask !== undefined ? query.codeMask : 0xFFFFFFFF,
-      limit: query.limit || 50,
-      offset: query.offset || 0,
-      flags: query.flags || 0
-    };
-
-    // Build sender conditions if present
-    if (query.senders && query.senders.length > 0) {
-      baseQuery.senderConditions = {
-        conditions: query.senders.map(sender => ({
-          value: sender,
-          type: MatchType.Exact
-        }))
-      };
-    }
-
-    // Build data conditions if present
-    if (query.dataConditions) {
-      const dataConds = {};
-      for (const key in query.dataConditions) {
-        const val = query.dataConditions[key];
-        const conditions = [];
-
-        if (Array.isArray(val)) {
-          for (const item of val) {
-            conditions.push({
-              value: String(item),
-              type: MatchType.Exact
-            });
-          }
-        } else {
-          conditions.push({
-            value: String(val),
-            type: MatchType.Exact
-          });
-        }
-
-        // Store without any table qualification
-        dataConds[key] = { conditions };
-      }
-      baseQuery.dataConditions = dataConds;
-    }
-
-    return EventQuery.create(baseQuery);
-  }
-
-
-
-
-
-  /**
-   * Converts a numeric CDP event code into a descriptive string.
-   * Multiple flags can be set simultaneously, so we combine them.
-   *
-   * Common codes (from the docs):
-   *   0x1        = AlarmSet
-   *   0x2        = AlarmClr
-   *   0x4        = AlarmAck
-   *   0x40       = AlarmReprise
-   *   0x100      = SourceObjectUnavailable
-   *   0x40000000 = NodeBoot
-   *
-   * @param {number} code - The event code from an eEventsResponse.
-   * @returns {string} - A human-readable combination of flags.
-   */
-  getEventCodeDescription(code) {
-    const flags = [];
-    if (code & 0x1) flags.push("AlarmSet");
-    if (code & 0x2) flags.push("AlarmClr");
-    if (code & 0x4) flags.push("AlarmAck");
-    if (code & 0x40) flags.push("AlarmReprise");
-    if (code & 0x100) flags.push("SourceObjectUnavailable");
-    if (code & 0x40000000) flags.push("NodeBoot");
-
-    if (flags.length === 0) {
-      flags.push("None");
-    }
-    return flags.join(" + ");
-  }
-
-  /**
- * Returns a human‐readable string for a given event code.
- *
- * @param {number} code - The numeric event code.
- * @returns {string} - The corresponding event code string.
- */
-  getEventCodeString(code) {
-    // Return empty string if eventCode is zero
-    if (code === 0) return "";
-
-    // Define the flag values (adjust these constants if needed)
-    const EventCodeFlags = {
-      AlarmSet: 0x1,
-      AlarmClr: 0x2,
-      AlarmAck: 0x4,
-      AlarmReprise: 0x40
-    };
-
-    // Check for specific combinations first
-    if (code === EventCodeFlags.AlarmSet) return "AlarmSet";
-    if (code === EventCodeFlags.AlarmClr) return "AlarmClear";
-    if (code === EventCodeFlags.AlarmAck) return "Ack";
-    if (code === EventCodeFlags.AlarmReprise) return "Reprise";
-    if (code === (EventCodeFlags.AlarmReprise | EventCodeFlags.AlarmSet))
-      return "RepriseAlarmSet";
-    if (code === (EventCodeFlags.AlarmReprise | EventCodeFlags.AlarmClr))
-      return "RepriseAlarmClear";
-    if (code === (EventCodeFlags.AlarmReprise | EventCodeFlags.AlarmAck))
-      return "RepriseAck";
-
-    // Otherwise, combine the flag strings based on which bits are set.
-    let s = "";
-    if (code & EventCodeFlags.AlarmReprise)
-      s += (s ? "+" : "") + "Reprise";
-    if (code & EventCodeFlags.AlarmSet)
-      s += (s ? "+" : "") + "AlarmSet";
-    if (code & EventCodeFlags.AlarmClr)
-      s += (s ? "+" : "") + "AlarmClear";
-    if (code & EventCodeFlags.AlarmAck)
-      s += (s ? "+" : "") + "Ack";
-
-    return s;
-  }
-
 
   _handleMessage(ws, message) {
     const data = Container.decode(new Uint8Array(message));
@@ -768,6 +741,177 @@ class Client {
     const buffer = Container.encode(container).finish();
     this.ws.send(buffer);
   }
+
+  _sendEventsRequest(requestId, query) {
+    const container = Container.create();
+    container.messageType = Container.Type.eEventsRequest;
+    container.eventsRequest = { requestId, query };
+    const buffer = Container.encode(container).finish();
+    this.ws.send(buffer);
+  }
+
+
+/**
+ * Helper method to validate the event query object.
+ *
+ * Allowed keys:
+ *  - timeRangeBegin (number)
+ *  - timeRangeEnd (number)
+ *  - limit (number)
+ *  - offset (number)
+ *  - codeMask (number)
+ *  - flags (number)
+ *  - senderConditions (array)
+ *  - dataConditions (object)
+ *
+ * @param {Object} query - The event query object provided by the user.
+ * @throws {Error} If the query contains invalid property names or incorrect types.
+ */
+_validateEventQuery(query) {
+  const allowedKeys = {
+    timeRangeBegin: 'number',
+    timeRangeEnd: 'number',
+    limit: 'number',
+    offset: 'number',
+    codeMask: 'number',
+    flags: 'number',
+    senderConditions: 'array',
+    dataConditions: 'object'
+  };
+
+  Object.keys(query).forEach(key => {
+    if (!allowedKeys.hasOwnProperty(key)) {
+      throw new Error(
+        `Invalid property "${key}" in event query. Allowed properties are: ${Object.keys(allowedKeys).join(', ')}.`
+      );
+    }
+    const expectedType = allowedKeys[key];
+    if (expectedType === 'number' && typeof query[key] !== 'number') {
+      throw new Error(`Property "${key}" must be a number.`);
+    }
+    if (expectedType === 'array' && !Array.isArray(query[key])) {
+      throw new Error(`Property "${key}" must be an array.`);
+    }
+    if (expectedType === 'object' && (typeof query[key] !== 'object' || query[key] === null || Array.isArray(query[key]))) {
+      throw new Error(`Property "${key}" must be an object.`);
+    }
+  });
+}
+
+/**
+ * Helper method to build a proper EventQuery message from a simple plain object.
+ *
+ * The returned `EventQuery` is used by `requestEvents()` to query 
+ * the CDPLogger or LogServer for matching events.
+ *
+ * @param {Object} query - The simple plain object query.
+ * @returns {DBMessaging.Protobuf.EventQuery} - The built EventQuery message.
+ * @throws {Error} If a condition object is missing required properties.
+ */
+_buildEventQuery(query) {
+  // Validate the query object before building the EventQuery.
+  this._validateEventQuery(query);
+
+  const root = require('./generated/containerPb.js');
+  const { EventQuery } = root.DBMessaging.Protobuf;
+  const { MatchType } = EventQuery;
+
+  // Conditionally include these fields only if the user has set them
+  const optionalFields = [
+    "timeRangeBegin",
+    "timeRangeEnd",
+    "codeMask",
+    "limit",
+    "offset",
+    "flags"
+  ];
+
+  // Build a base query object that includes only the fields provided
+  const baseQuery = {};
+  optionalFields.forEach(field => {
+    if (query[field] !== undefined) {
+      baseQuery[field] = query[field];
+    }
+  });
+
+  // Build senderConditions if present
+  if (query.senderConditions && query.senderConditions.length > 0) {
+    baseQuery.senderConditions = {
+      conditions: query.senderConditions.map(condition => {
+        // Validate that condition is either a plain string or an object with a "value" property.
+        if (typeof condition === 'object' && condition !== null) {
+          if (!('value' in condition)) {
+            throw new Error(
+              `Sender condition object must include a 'value' property. Received: ${JSON.stringify(condition)}`
+            );
+          }
+          return {
+            value: String(condition.value),
+            type: condition.matchType === "wildcard" ? MatchType.Wildcard : MatchType.Exact
+          };
+        } else {
+          return {
+            value: condition,
+            type: MatchType.Exact
+          };
+        }
+      })
+    };
+  }
+
+  // Build data conditions if present
+  if (query.dataConditions) {
+    const dataConds = {};
+    for (const key in query.dataConditions) {
+      const val = query.dataConditions[key];
+      const conditions = [];
+
+      if (Array.isArray(val)) {
+        for (const item of val) {
+          if (typeof item === 'object' && item !== null) {
+            if (!('value' in item)) {
+              throw new Error(
+                `Data condition for key "${key}" must include a 'value' property. Received: ${JSON.stringify(item)}`
+              );
+            }
+            conditions.push({
+              value: String(item.value),
+              type: item.matchType === "wildcard" ? MatchType.Wildcard : MatchType.Exact
+            });
+          } else {
+            conditions.push({
+              value: String(item),
+              type: MatchType.Exact
+            });
+          }
+        }
+      } else if (typeof val === 'object' && val !== null) {
+        if (!('value' in val)) {
+          throw new Error(
+            `Data condition for key "${key}" must include a 'value' property. Received: ${JSON.stringify(val)}`
+          );
+        }
+        conditions.push({
+          value: String(val.value),
+          type: val.matchType === "wildcard" ? MatchType.Wildcard : MatchType.Exact
+        });
+      } else {
+        conditions.push({
+          value: String(val),
+          type: MatchType.Exact
+        });
+      }
+
+      dataConds[key] = { conditions };
+    }
+    baseQuery.dataConditions = dataConds;
+  }
+
+  return EventQuery.create(baseQuery);
+}
+
+
+
 }
 
 module.exports = Client;
