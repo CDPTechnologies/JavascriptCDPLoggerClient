@@ -236,7 +236,7 @@ describe('ClientTester', () => {
     client._parseMessage(response);
   });
 
-  // Updated test for events with conditions
+  // Updated test for events with conditions using expected query structure.
   test('test_events_request_with_conditions', () => {
     client.isOpen = true;
     client._sendTimeRequest = jest.fn();
@@ -249,31 +249,21 @@ describe('ClientTester', () => {
       limit: 10,
       offset: 0,
       flags: 0,
-      senderConditions: {
-        conditions: [
-          { value: "*TemperatureSensor*", type: 1 } // Wildcard
-        ]
-      },
+      senderConditions: ["*CDPLoggerDemoApp.Sine*"],
       dataConditions: {
-        pressure: {
-          conditions: [
-            { value: "high", type: 0 } // Exact
-          ]
-        }
+        "Text": "Component was suspended!"
       }
     };
 
     client.requestEvents(queryWithConditions);
-    // Expect the _updateTimeDiff from _timeRequest to have been called first
-    // Then _sendEventsRequest should be called with request id 1 (not 0).
-    expect(client._sendTimeRequest).toHaveBeenCalled();
-    expect(client._sendEventsRequest).toHaveBeenCalledWith(
-      1, // adjusted expectation
-      queryWithConditions
-    );
+    // Expect _sendTimeRequest to have been called first with id 0.
+    expect(client._sendTimeRequest).toHaveBeenCalledWith(0);
+    // Build the expected query using _buildEventQuery.
+    const builtQuery = client._buildEventQuery(queryWithConditions);
+    expect(client._sendEventsRequest).toHaveBeenCalledWith(1, builtQuery);
   });
 
-  // Updated test for events with no known flags (code=0 should yield codeDescription "None")
+  // Updated test for events with no known flags (code=0 => "None")
   test('test_event_code_description_none', done => {
     client.isOpen = true;
     client.requestEvents({})
@@ -285,11 +275,10 @@ describe('ClientTester', () => {
       })
       .catch(done.fail);
   
-    // Adjust the response requestId to match the expected request id (should be 1)
     const response = {
       messageType: fakeData.Container.Type.eEventsResponse,
       eventsResponse: {
-        requestId: 1, // updated from 0 to 1
+        requestId: 1,
         events: [
           {
             sender: "Test",
@@ -311,13 +300,13 @@ describe('ClientTester', () => {
     client.requestEvents({ timeRangeBegin: 1000, timeRangeEnd: 2000, codeMask: 0, limit: 10, offset: 0, flags: 0 })
       .then(events => {
         expect(events).toHaveLength(1);
-        // code = 0x5 => (AlarmSet + AlarmAck)
+        // code = 0x5 => (AlarmSet (0x1) + AlarmAck (0x4))
         expect(events[0].code).toBe(0x5);
         expect(events[0].codeDescription).toBe("AlarmSet + AlarmAck");
         done();
       })
       .catch(done.fail);
-    // Simulate a multi-flag code: 0x5 => AlarmSet (0x1) + AlarmAck (0x4).
+    // Simulate a multi-flag event response.
     const response = {
       messageType: fakeData.Container.Type.eEventsResponse,
       eventsResponse: {
@@ -327,6 +316,55 @@ describe('ClientTester', () => {
         ]
       }
     };
+    client._parseMessage(response);
+  });
+
+  test('test_realistic_events', done => {
+    client.isOpen = true;
+
+    // Request events in a time window covering the sample timestamps (08:34:50..08:37:21)
+    client.requestEvents({
+      timeRangeBegin: 1740284000,
+      timeRangeEnd:   1740284300,
+      codeMask: 0xFFFFFFFF,
+      limit: 10,
+      offset: 0,
+      flags: 0
+    })
+    .then(events => {
+      // We expect to receive 4 events total
+      expect(events).toHaveLength(4);
+
+      // 1) InvalidLicense alarm
+      expect(events[0].sender).toBe("CPDLoggerDemoApp.InvalidLicense");
+      expect(events[0].data["Text"]).toBe("Invalid or missing feature license detected.");
+      expect(events[0].codeDescription).toBe("AlarmSet");
+      expect(events[0].status).toBe(1); // "Error"
+
+      // 2) CPDEventNotification
+      expect(events[1].sender).toBe("CDPLoggerDemoApp.CPDEventNotification");
+      expect(events[1].data["Text"]).toBe("CDP event notice");
+      expect(events[1].codeDescription).toBe("None");
+      expect(events[1].status).toBe(3); // "Notify"
+
+      // 3) A component is suspended
+      expect(events[2].sender).toBe("CPDLoggerDemoApp");
+      expect(events[2].data["Text"]).toContain("A component is suspended");
+      expect(events[2].codeDescription).toBe("AlarmSet");
+      expect(events[2].status).toBe(1); // "Error"
+
+      // 4) Another suspended warning
+      expect(events[3].sender).toBe("CPDLoggerDemoApp");
+      expect(events[3].data["Text"]).toBe("Component was suspended");
+      expect(events[3].codeDescription).toBe("None");
+      expect(events[3].status).toBe(2); // "Warning"
+
+      done();
+    })
+    .catch(done.fail);
+
+    // Simulate the server responding with these "realistic" events
+    const response = fakeData.createRealisticEventsResponse(1);
     client._parseMessage(response);
   });
 });

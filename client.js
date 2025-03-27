@@ -1,4 +1,4 @@
-/* client.js */
+// client.js
 const WebSocket = require('ws');
 const root = require('./generated/containerPb.js');
 const Container = root.DBMessaging.Protobuf.Container;
@@ -21,9 +21,7 @@ class Client {
 
     this.reqId = -1;
     this.autoReconnect = autoReconnect;
-
-    // Time synchronization is enabled by default.
-    this.enableTimeSync = true;
+    this.enableTimeSync = true; // Time synchronization is enabled by default.
 
     this.isOpen = false;
     this.queuedRequests = {};
@@ -129,6 +127,9 @@ class Client {
 
   // --- Public API methods ---
 
+  /**
+   * Request the API version.
+   */
   requestApiVersion() {
     this._timeRequest();
     const requestId = this._getRequestId();
@@ -142,6 +143,9 @@ class Client {
     });
   }
 
+  /**
+   * Request the list of logged nodes.
+   */
   requestLoggedNodes() {
     this._timeRequest();
     const requestId = this._getRequestId();
@@ -155,6 +159,9 @@ class Client {
     });
   }
 
+  /**
+   * Request the log limits.
+   */
   requestLogLimits() {
     this._timeRequest();
     const requestId = this._getRequestId();
@@ -168,6 +175,14 @@ class Client {
     });
   }
 
+  /**
+   * Request data points for given node names and time range.
+   * @param {Array<string>} nodeNames
+   * @param {number} startS
+   * @param {number} endS
+   * @param {number} noOfDataPoints
+   * @returns {Promise<Array>}
+   */
   requestDataPoints(nodeNames, startS, endS, noOfDataPoints) {
     this._timeRequest();
     const requestId = this._getRequestId();
@@ -186,61 +201,62 @@ class Client {
    * Request events based on the provided query parameters.
    *
    * The `query.flags` field uses bitmask values similar to an enum:
-   *   0 = None
-   *   1 = NewestFirst
-   *   2 = TimeRangeBeginExclusive
-   *   4 = TimeRangeEndExclusive
-   *   8 = UseLogStampForTimeRange
    *
-   * The `query.senderConditions` field can be used to filter by event sender (Source).
-   * The `query.dataConditions` field can be used to filter by data fields (key-value patterns).
-   *
-   * For additional information:
-   *   https://cdpstudio.com/manual/cdp/cdplogger/eventlogreader.html#Flags-enum
+   *   0 = None  
+   *   1 = NewestFirst  
+   *   2 = TimeRangeBeginExclusive  
+   *   4 = TimeRangeEndExclusive  
+   *   8 = UseLogStampForTimeRange  
+   * 
+   *      For additional information:
+   *   https://cdpstudio.com/manual/cdp/cdp2sql/logmanager-eventquery.html#Flags-enum
    *   https://cdpstudio.com/manual/cdp/cdplogger/eventlogreader.html#cdp-event-code-flags
    *
-   * We also support mapping the `evt.code` field to a human-readable string
-   * with `getEventCodeDescription()`.
+   * In addition, the user can simply supply the following properties in the query object:
    *
-   * @param {Object} query - An object matching the EventQuery schema.
-   * Example:
-   * {
-   *   timeRangeBegin: 1620000000,
-   *   timeRangeEnd:   1620003600,
-   *   codeMask:       0xFFFFFFFF,
-   *   limit:          100,
-   *   offset:         0,
-   *   flags:          1, // e.g. 'NewestFirst'
+   *   - **senderConditions**: An array of sender strings (exact matches by default).
+   *   - **dataConditions**: An object where each key is a data field name and the value can be:
+   *       - A string (defaults to an exact match),
+   *       - An array of strings,
+   *       - An object (or array of objects) with properties:
+   *           - `value`: the string value to match,
+   *           - `matchType`: either `"exact"` (default) or `"wildcard"`.
    *
-   *   // Example conditions:
-   *   senderConditions: {
-   *     conditions: [
-   *       { value: "*TemperatureSensor*", type: 1 } // 1 = Wildcard
-   *     ]
-   *   },
-   *   dataConditions: {
-   *     pressure: {
-   *       conditions: [
-   *         { value: "high", type: 0 } // 0 = Exact
-   *       ]
-   *     }
-   *   }
-   * }
+   * enum EventQuery::MatchType:
+   *   - Exact (0): The string must match exactly.
+   *   - Wildcard (1): The string may contain wildcards.
    *
+   * Example usage:
+   *
+   *   // Filter for events with sender exactly "CDPLoggerDemoApp.InvalidLicense":
+   *   { senderConditions: ["CDPLoggerDemoApp.InvalidLicense"] }
+   *
+   *   // Filter for events where the "Text" data field equals "Invalid or missing feature license detected.":
+   *   { dataConditions: { "Text": "Invalid or missing feature license detected." } }
+   *
+   *
+   * @param {Object} query - A simple plain object representing the EventQuery.
    * @returns {Promise<Array>} Resolves with an array of events (each event includes a 'codeDescription').
    */
   requestEvents(query) {
     this._timeRequest();
     const requestId = this._getRequestId();
+    // Convert the simple query into a proper EventQuery message.
+    const eventQuery = this._buildEventQuery(query);
+
+
+
     if (!this.isOpen) {
-      this.queuedRequests[requestId] = { type: "events", query: query };
+      this.queuedRequests[requestId] = { type: "events", query: eventQuery };
     } else {
-      this._sendEventsRequest(requestId, query);
+      this._sendEventsRequest(requestId, eventQuery);
     }
     return new Promise((resolve, reject) => {
       this.storedPromises[requestId] = { resolve, reject };
     });
   }
+
+  // --- Internal methods ---
 
   _sendEventsRequest(requestId, query) {
     const container = Container.create();
@@ -249,6 +265,74 @@ class Client {
     const buffer = Container.encode(container).finish();
     this.ws.send(buffer);
   }
+
+  /**
+   * Helper method to build a proper EventQuery message from a simple plain object.
+   *
+   *
+   *
+   *
+   * @param {Object} query - The simple plain object query.
+   * @returns {DBMessaging.Protobuf.EventQuery} - The built EventQuery message.
+   */
+  _buildEventQuery(query) {
+    const root = require('./generated/containerPb.js');
+    const { EventQuery } = root.DBMessaging.Protobuf;
+    const { MatchType } = EventQuery;
+
+    // Create base query with primitive fields
+    const baseQuery = {
+      timeRangeBegin: query.timeRangeBegin || 0,
+      timeRangeEnd: query.timeRangeEnd || Math.floor(Date.now() / 1000),
+      codeMask: query.codeMask !== undefined ? query.codeMask : 0xFFFFFFFF,
+      limit: query.limit || 50,
+      offset: query.offset || 0,
+      flags: query.flags || 0
+    };
+
+    // Build sender conditions if present
+    if (query.senders && query.senders.length > 0) {
+      baseQuery.senderConditions = {
+        conditions: query.senders.map(sender => ({
+          value: sender,
+          type: MatchType.Exact
+        }))
+      };
+    }
+
+    // Build data conditions if present
+    if (query.dataConditions) {
+      const dataConds = {};
+      for (const key in query.dataConditions) {
+        const val = query.dataConditions[key];
+        const conditions = [];
+
+        if (Array.isArray(val)) {
+          for (const item of val) {
+            conditions.push({
+              value: String(item),
+              type: MatchType.Exact
+            });
+          }
+        } else {
+          conditions.push({
+            value: String(val),
+            type: MatchType.Exact
+          });
+        }
+
+        // Store without any table qualification
+        dataConds[key] = { conditions };
+      }
+      baseQuery.dataConditions = dataConds;
+    }
+
+    return EventQuery.create(baseQuery);
+  }
+
+
+
+
 
   /**
    * Converts a numeric CDP event code into a descriptive string.
@@ -262,8 +346,8 @@ class Client {
    *   0x100      = SourceObjectUnavailable
    *   0x40000000 = NodeBoot
    *
-   * @param {number} code - The event code from an eEventsResponse
-   * @returns {string} - A human-readable combination of flags
+   * @param {number} code - The event code from an eEventsResponse.
+   * @returns {string} - A human-readable combination of flags.
    */
   getEventCodeDescription(code) {
     const flags = [];
@@ -279,6 +363,51 @@ class Client {
     }
     return flags.join(" + ");
   }
+
+  /**
+ * Returns a human‐readable string for a given event code.
+ *
+ * @param {number} code - The numeric event code.
+ * @returns {string} - The corresponding event code string.
+ */
+  getEventCodeString(code) {
+    // Return empty string if eventCode is zero
+    if (code === 0) return "";
+
+    // Define the flag values (adjust these constants if needed)
+    const EventCodeFlags = {
+      AlarmSet: 0x1,
+      AlarmClr: 0x2,
+      AlarmAck: 0x4,
+      AlarmReprise: 0x40
+    };
+
+    // Check for specific combinations first
+    if (code === EventCodeFlags.AlarmSet) return "AlarmSet";
+    if (code === EventCodeFlags.AlarmClr) return "AlarmClear";
+    if (code === EventCodeFlags.AlarmAck) return "Ack";
+    if (code === EventCodeFlags.AlarmReprise) return "Reprise";
+    if (code === (EventCodeFlags.AlarmReprise | EventCodeFlags.AlarmSet))
+      return "RepriseAlarmSet";
+    if (code === (EventCodeFlags.AlarmReprise | EventCodeFlags.AlarmClr))
+      return "RepriseAlarmClear";
+    if (code === (EventCodeFlags.AlarmReprise | EventCodeFlags.AlarmAck))
+      return "RepriseAck";
+
+    // Otherwise, combine the flag strings based on which bits are set.
+    let s = "";
+    if (code & EventCodeFlags.AlarmReprise)
+      s += (s ? "+" : "") + "Reprise";
+    if (code & EventCodeFlags.AlarmSet)
+      s += (s ? "+" : "") + "AlarmSet";
+    if (code & EventCodeFlags.AlarmClr)
+      s += (s ? "+" : "") + "AlarmClear";
+    if (code & EventCodeFlags.AlarmAck)
+      s += (s ? "+" : "") + "Ack";
+
+    return s;
+  }
+
 
   _handleMessage(ws, message) {
     const data = Container.decode(new Uint8Array(message));
@@ -396,13 +525,12 @@ class Client {
       }
 
       case Container.Type.eEventsResponse: {
-        // Optionally enrich each event with a human-readable code description:
+        // Enrich events with a human-readable code description.
         if (data.eventsResponse.events && data.eventsResponse.events.length > 0) {
           data.eventsResponse.events.forEach(evt => {
             evt.codeDescription = this.getEventCodeDescription(evt.code);
           });
         }
-
         if (this.storedPromises[data.eventsResponse.requestId]) {
           const { resolve } = this.storedPromises[data.eventsResponse.requestId];
           delete this.storedPromises[data.eventsResponse.requestId];
@@ -524,9 +652,7 @@ class Client {
     }
     const requestId = reqId;
     this.lastTimeRequest = Date.now() / 1000;
-    // Always send the time request.
     this._sendTimeRequest(requestId);
-    // Create the promise and store the callbacks.
     const promise = new Promise((resolve, reject) => {
       this.storedPromises[requestId] = { resolve, reject };
     });
