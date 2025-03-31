@@ -12,6 +12,20 @@ const CDPValueType = root.ICD.Protobuf.CDPValueType;
  * - Time synchronization between the client and the server
  */
 class Client {
+  // Defined property names to use instead of ambiguous numbers.
+  static EventQueryFlags = Object.freeze({
+    None: 0, // Client.EventQueryFlags.None === 0
+    NewestFirst: 1,
+    TimeRangeBeginExclusive: 2,
+    TimeRangeEndExclusive: 4,
+    UseLogStampForTimeRange: 8
+  });
+
+  static MatchType = Object.freeze({
+    Exact: 0,
+    Wildcard: 1
+  });
+
   /**
    * Create a new Client instance to communicate with the logger.
    *
@@ -97,6 +111,22 @@ class Client {
    * or the logger server that you are connecting to. The version can be used 
    * to ensure compatibility with certain features.
    *
+   *   Version History:
+  * - 3.0 (2017-08, CDP 4.3): Minimum supported version.
+  * - 3.1 (2020-08, CDP 4.9):
+  *     - Support for reading full resolution data by setting num_of_datapoints to 0.
+  *     - Added a limit argument to SignalDataRequest (behaves like SQL LIMIT, where 0 means no limit).
+  *     - The server now notifies of dropped queries by returning a TooManyRequests error
+  *       when too many pending requests exist.
+  * - 3.2 (2022-11, CDP 4.11): Limits queries to 50,000 rows to avoid overloading the logger app;
+  *     larger data sets should be downloaded in patches.
+  * - 4.0 (2024-01, CDP 4.12):
+  *     - Added NodeTag support to save custom tags for logged values (e.g. Unit or Description),
+  *       accessible through the NodeInfo struct and TagMap protobuf message.
+  *     - Reduced network usage on the built-in server by having SignalDataResponse
+  *       only include changes instead of repeating unchanged values.
+  *     - Added support for string values and events.
+  *
    * @returns {Promise<string>} A promise that resolves with the version string
    *   (e.g., "4.5.2"). If the version is below 3.0, the promise is rejected with
    *   an error indicating an incompatible version.
@@ -118,7 +148,7 @@ class Client {
    * Request the list of logged nodes.
    *
    * In CDP Studio, this corresponds to the "LoggedValues" table of the 
-   * CDPLogger (or LogServer) component. The returned list includes node 
+   * CDPLogger component. The returned list includes node 
    * names, paths, and any associated tags that might be assigned to 
    * those nodes.
    *
@@ -169,20 +199,27 @@ class Client {
   /**
    * Request data points for the specified node names over a given time range.
    *
-   * In CDP Studio, this retrieves time-series data from the logged nodes
-   * (CDP signals) in the specified range. The number of data points is
+   * This retrieves time-series data from the logged nodes
+   * (CDP signals, arguments, properties and other value nodes) in the specified range. The number of data points is
    * adjustable, allowing for either raw or decimated data.
    *
    * @param {Array<string>} nodeNames - The names of the nodes/signals to retrieve.
    * @param {number} startS - The start time (in seconds since epoch).
    * @param {number} endS - The end time (in seconds since epoch).
    * @param {number} noOfDataPoints - The maximum number of data points to retrieve.
+   *   - If you specify a nonzero value, the server will decimate or downsample
+   *     the data to roughly that many points across [startS..endS].
+   *   - If you set it to 0, the server returns the data at full resolution
+   *     (i.e., no decimation).
    * @returns {Promise<Array>} A promise that resolves with an array of objects,
    *   where each object has:
    *   - `timestamp` (number): The time (in seconds) for the data row.
    *   - `value` (object): A key-value mapping of node names to an object with
    *       `min`, `max`, and `last` properties representing the node's values
    *       at that timestamp.
+   * @param {number} limit - Similar to SQL LIMIT. It allows to request data 
+   *    in batches by setting the maximum batch size (the number of samples). 
+   *    Note, reading data in larger batches will improve performance but also allocate more memory.
    */
   requestDataPoints(nodeNames, startS, endS, noOfDataPoints) {
     this._timeRequest();
@@ -224,9 +261,20 @@ class Client {
    *   { dataConditions: { "Text": "Invalid or missing feature license detected." } }
    *
    * @param {Object} query - A simple plain object representing the EventQuery.
-   * @returns {Promise<Array>} Resolves with an array of events (each event 
-   *   includes a `codeDescription` which provides a textual representation 
-   *   of the event code).
+   * @returns {Promise<Array>} Resolves with an array of event objects.
+   *
+   * Each event object typically includes the following fields:
+   *  - `sender` (string): The event sender.
+   *  - `data` (object): An object containing event-specific details:
+   *       - `Text` (string): The event text message.
+   *       - `Level` (string): The event level (e.g., "ERROR").
+   *       - `Description` (string): A detailed description of the event.
+   *       - `Group` (string): A group identifier for the event.
+   *  - `timestampSec` (number): The timestamp (in seconds) when the event occurred.
+   *  - `id` (string): A unique identifier for the event.
+   *  - `code` (number): The raw event code returned by the server.
+   *  - `status` (number): The status code associated with the event.
+   *  - `logstampSec` (number): The log timestamp (in seconds) when the event was logged.
    */
   requestEvents(query) {
     this._timeRequest();
@@ -275,57 +323,57 @@ class Client {
     return flags.join(" + ");
   }
 
-/**
- * Returns a human‐readable string for a given event code.
- * If multiple flags are set, it attempts to identify known
- * combinations; otherwise, it combines them with a plus sign.
- *
- * @param {number} code - The numeric event code.
- * @returns {string} - The corresponding event code string.
- */
-getEventCodeString(code) {
-  // Return empty string if eventCode is zero
-  if (code === 0) return "";
+  /**
+   * Returns a human‐readable string for a given event code.
+   * If multiple flags are set, it attempts to identify known
+   * combinations; otherwise, it combines them with a plus sign.
+   *
+   * @param {number} code - The numeric event code.
+   * @returns {string} - The corresponding event code string.
+   */
+  getEventCodeString(code) {
+    // Return empty string if eventCode is zero
+    if (code === 0) return "";
 
-  // Define the flag values
-  const EventCodeFlags = {
-    AlarmSet: 0x1,
-    AlarmClr: 0x2,
-    AlarmAck: 0x4,
-    AlarmReprise: 0x40,
-    SourceObjectUnavailable: 0x100,
-    NodeBoot: 0x40000000
-  };
+    // Define the flag values
+    const EventCodeFlags = {
+      AlarmSet: 0x1,
+      AlarmClr: 0x2,
+      AlarmAck: 0x4,
+      AlarmReprise: 0x40,
+      SourceObjectUnavailable: 0x100,
+      NodeBoot: 0x40000000
+    };
 
-  // Check for specific single-flag codes or two-flag combos
-  if (code === EventCodeFlags.AlarmSet) return "AlarmSet";
-  if (code === EventCodeFlags.AlarmClr) return "AlarmClear";
-  if (code === EventCodeFlags.AlarmAck) return "Ack";
-  if (code === EventCodeFlags.AlarmReprise) return "Reprise";
-  if (code === (EventCodeFlags.AlarmReprise | EventCodeFlags.AlarmSet))
-    return "RepriseAlarmSet";
-  if (code === (EventCodeFlags.AlarmReprise | EventCodeFlags.AlarmClr))
-    return "RepriseAlarmClear";
-  if (code === (EventCodeFlags.AlarmReprise | EventCodeFlags.AlarmAck))
-    return "RepriseAck";
+    // Check for specific single-flag codes or two-flag combos
+    if (code === EventCodeFlags.AlarmSet) return "AlarmSet";
+    if (code === EventCodeFlags.AlarmClr) return "AlarmClear";
+    if (code === EventCodeFlags.AlarmAck) return "Ack";
+    if (code === EventCodeFlags.AlarmReprise) return "Reprise";
+    if (code === (EventCodeFlags.AlarmReprise | EventCodeFlags.AlarmSet))
+      return "RepriseAlarmSet";
+    if (code === (EventCodeFlags.AlarmReprise | EventCodeFlags.AlarmClr))
+      return "RepriseAlarmClear";
+    if (code === (EventCodeFlags.AlarmReprise | EventCodeFlags.AlarmAck))
+      return "RepriseAck";
 
-  // Otherwise, combine the flag strings based on which bits are set
-  let s = "";
-  if (code & EventCodeFlags.AlarmReprise)
-    s += (s ? "+" : "") + "Reprise";
-  if (code & EventCodeFlags.AlarmSet)
-    s += (s ? "+" : "") + "AlarmSet";
-  if (code & EventCodeFlags.AlarmClr)
-    s += (s ? "+" : "") + "AlarmClear";
-  if (code & EventCodeFlags.AlarmAck)
-    s += (s ? "+" : "") + "Ack";
-  if (code & EventCodeFlags.NodeBoot)
-    s += (s ? "+" : "") + "EventNodeBoot";
-  if (code & EventCodeFlags.SourceObjectUnavailable)
-    s += (s ? "+" : "") + "SourceObjectUnavailable";
+    // Otherwise, combine the flag strings based on which bits are set
+    let s = "";
+    if (code & EventCodeFlags.AlarmReprise)
+      s += (s ? "+" : "") + "Reprise";
+    if (code & EventCodeFlags.AlarmSet)
+      s += (s ? "+" : "") + "AlarmSet";
+    if (code & EventCodeFlags.AlarmClr)
+      s += (s ? "+" : "") + "AlarmClear";
+    if (code & EventCodeFlags.AlarmAck)
+      s += (s ? "+" : "") + "Ack";
+    if (code & EventCodeFlags.NodeBoot)
+      s += (s ? "+" : "") + "EventNodeBoot";
+    if (code & EventCodeFlags.SourceObjectUnavailable)
+      s += (s ? "+" : "") + "SourceObjectUnavailable";
 
-  return s;
-}
+    return s;
+  }
 
 
   // --- Internal methods ---
@@ -535,14 +583,25 @@ getEventCodeString(code) {
     const value = {};
     for (let i = 0; i < signalNames.length; i++) {
       const signalType = this.nameToType[signalNames[i]] || CDPValueType.eDOUBLE;
-      value[signalNames[i]] = {
-        min: this._valueFromVariant(minValues[i], signalType),
-        max: this._valueFromVariant(maxValues[i], signalType),
-        last: this._valueFromVariant(lastValues[i], signalType)
-      };
+      if (minValues.length === 0 || maxValues.length === 0) {
+        // Server does not send min and max when they are equal to last
+        const last = this._valueFromVariant(lastValues[i], signalType);
+        value[signalNames[i]] = {
+          min: last,
+          max: last,
+          last: last
+        };
+      } else {
+        value[signalNames[i]] = {
+          min: this._valueFromVariant(minValues[i], signalType),
+          max: this._valueFromVariant(maxValues[i], signalType),
+          last: this._valueFromVariant(lastValues[i], signalType)
+        };
+      }
     }
     return value;
   }
+
 
   _valueFromVariant(variant, type) {
     if (!variant) return null;
@@ -751,167 +810,168 @@ getEventCodeString(code) {
   }
 
 
-/**
- * Helper method to validate the event query object.
- *
- * Allowed keys:
- *  - timeRangeBegin (number)
- *  - timeRangeEnd (number)
- *  - limit (number)
- *  - offset (number)
- *  - codeMask (number)
- *  - flags (number)
- *  - senderConditions (array)
- *  - dataConditions (object)
- *
- * @param {Object} query - The event query object provided by the user.
- * @throws {Error} If the query contains invalid property names or incorrect types.
- */
-_validateEventQuery(query) {
-  const allowedKeys = {
-    timeRangeBegin: 'number',
-    timeRangeEnd: 'number',
-    limit: 'number',
-    offset: 'number',
-    codeMask: 'number',
-    flags: 'number',
-    senderConditions: 'array',
-    dataConditions: 'object'
-  };
-
-  Object.keys(query).forEach(key => {
-    if (!allowedKeys.hasOwnProperty(key)) {
-      throw new Error(
-        `Invalid property "${key}" in event query. Allowed properties are: ${Object.keys(allowedKeys).join(', ')}.`
-      );
-    }
-    const expectedType = allowedKeys[key];
-    if (expectedType === 'number' && typeof query[key] !== 'number') {
-      throw new Error(`Property "${key}" must be a number.`);
-    }
-    if (expectedType === 'array' && !Array.isArray(query[key])) {
-      throw new Error(`Property "${key}" must be an array.`);
-    }
-    if (expectedType === 'object' && (typeof query[key] !== 'object' || query[key] === null || Array.isArray(query[key]))) {
-      throw new Error(`Property "${key}" must be an object.`);
-    }
-  });
-}
-
-/**
- * Helper method to build a proper EventQuery message from a simple plain object.
- *
- * The returned `EventQuery` is used by `requestEvents()` to query 
- * the CDPLogger or LogServer for matching events.
- *
- * @param {Object} query - The simple plain object query.
- * @returns {DBMessaging.Protobuf.EventQuery} - The built EventQuery message.
- * @throws {Error} If a condition object is missing required properties.
- */
-_buildEventQuery(query) {
-  // Validate the query object before building the EventQuery.
-  this._validateEventQuery(query);
-
-  const root = require('./generated/containerPb.js');
-  const { EventQuery } = root.DBMessaging.Protobuf;
-  const { MatchType } = EventQuery;
-
-  // Conditionally include these fields only if the user has set them
-  const optionalFields = [
-    "timeRangeBegin",
-    "timeRangeEnd",
-    "codeMask",
-    "limit",
-    "offset",
-    "flags"
-  ];
-
-  // Build a base query object that includes only the fields provided
-  const baseQuery = {};
-  optionalFields.forEach(field => {
-    if (query[field] !== undefined) {
-      baseQuery[field] = query[field];
-    }
-  });
-
-  // Build senderConditions if present
-  if (query.senderConditions && query.senderConditions.length > 0) {
-    baseQuery.senderConditions = {
-      conditions: query.senderConditions.map(condition => {
-        // Validate that condition is either a plain string or an object with a "value" property.
-        if (typeof condition === 'object' && condition !== null) {
-          if (!('value' in condition)) {
-            throw new Error(
-              `Sender condition object must include a 'value' property. Received: ${JSON.stringify(condition)}`
-            );
-          }
-          return {
-            value: String(condition.value),
-            type: condition.matchType === "wildcard" ? MatchType.Wildcard : MatchType.Exact
-          };
-        } else {
-          return {
-            value: condition,
-            type: MatchType.Exact
-          };
-        }
-      })
+  /**
+   * Helper method to validate the event query object.
+   *
+   * Allowed keys:
+   *  - timeRangeBegin (number)
+   *  - timeRangeEnd (number)
+   *  - limit (number)
+   *  - offset (number)
+   *  - codeMask (number)
+   *  - flags (number)
+   *  - senderConditions (array)
+   *  - dataConditions (object)
+   *
+   * @param {Object} query - The event query object provided by the user.
+   * @throws {Error} If the query contains invalid property names or incorrect types.
+   */
+  _validateEventQuery(query) {
+    const allowedKeys = {
+      timeRangeBegin: 'number',
+      timeRangeEnd: 'number',
+      limit: 'number',
+      offset: 'number',
+      codeMask: 'number',
+      flags: 'number',
+      senderConditions: 'array',
+      dataConditions: 'object'
     };
+
+    Object.keys(query).forEach(key => {
+      if (!allowedKeys.hasOwnProperty(key)) {
+        throw new Error(
+          `Invalid property "${key}" in event query. Allowed properties are: ${Object.keys(allowedKeys).join(', ')}.`
+        );
+      }
+      const expectedType = allowedKeys[key];
+      if (expectedType === 'number' && typeof query[key] !== 'number') {
+        throw new Error(`Property "${key}" must be a number.`);
+      }
+      if (expectedType === 'array' && !Array.isArray(query[key])) {
+        throw new Error(`Property "${key}" must be an array.`);
+      }
+      if (expectedType === 'object' && (typeof query[key] !== 'object' || query[key] === null || Array.isArray(query[key]))) {
+        throw new Error(`Property "${key}" must be an object.`);
+      }
+    });
   }
 
-  // Build data conditions if present
-  if (query.dataConditions) {
-    const dataConds = {};
-    for (const key in query.dataConditions) {
-      const val = query.dataConditions[key];
-      const conditions = [];
-
-      if (Array.isArray(val)) {
-        for (const item of val) {
-          if (typeof item === 'object' && item !== null) {
-            if (!('value' in item)) {
+  /**
+   * Helper method to build a proper EventQuery message from a simple plain object.
+   *
+   * The returned `EventQuery` is used by `requestEvents()` to query 
+   * the CDPLogger or LogServer for matching events.
+   *
+   * @param {Object} query - The simple plain object query.
+   * @returns {DBMessaging.Protobuf.EventQuery} - The built EventQuery message.
+   * @throws {Error} If a condition object is missing required properties.
+   */
+  _buildEventQuery(query) {
+    // Validate the query object before building the EventQuery.
+    this._validateEventQuery(query);
+  
+    const root = require('./generated/containerPb.js');
+    const { EventQuery } = root.DBMessaging.Protobuf;
+  
+    // Conditionally include these fields only if the user has set them
+    const optionalFields = [
+      "timeRangeBegin",
+      "timeRangeEnd",
+      "codeMask",
+      "limit",
+      "offset",
+      "flags"
+    ];
+  
+    // Build a base query object that includes only the fields provided
+    const baseQuery = {};
+    optionalFields.forEach(field => {
+      if (query[field] !== undefined) {
+        baseQuery[field] = query[field];
+      }
+    });
+  
+    // Build senderConditions if present
+    if (query.senderConditions && query.senderConditions.length > 0) {
+      baseQuery.senderConditions = {
+        conditions: query.senderConditions.map(condition => {
+          if (typeof condition === 'object' && condition !== null) {
+            if (!('value' in condition)) {
               throw new Error(
-                `Data condition for key "${key}" must include a 'value' property. Received: ${JSON.stringify(item)}`
+                `Sender condition object must include a 'value' property. Received: ${JSON.stringify(condition)}`
               );
             }
-            conditions.push({
-              value: String(item.value),
-              type: item.matchType === "wildcard" ? MatchType.Wildcard : MatchType.Exact
-            });
+            return {
+              value: String(condition.value),
+              type: condition.matchType !== undefined
+                ? condition.matchType
+                : Client.MatchType.Wildcard
+            };
           } else {
-            conditions.push({
-              value: String(item),
-              type: MatchType.Exact
-            });
+            return {
+              value: condition,
+              type: Client.MatchType.Wildcard
+            };
           }
-        }
-      } else if (typeof val === 'object' && val !== null) {
-        if (!('value' in val)) {
-          throw new Error(
-            `Data condition for key "${key}" must include a 'value' property. Received: ${JSON.stringify(val)}`
-          );
-        }
-        conditions.push({
-          value: String(val.value),
-          type: val.matchType === "wildcard" ? MatchType.Wildcard : MatchType.Exact
-        });
-      } else {
-        conditions.push({
-          value: String(val),
-          type: MatchType.Exact
-        });
-      }
-
-      dataConds[key] = { conditions };
+        })
+      };
     }
-    baseQuery.dataConditions = dataConds;
+  
+    // Build data conditions if present
+    if (query.dataConditions) {
+      const dataConds = {};
+      for (const key in query.dataConditions) {
+        const val = query.dataConditions[key];
+        const conditions = [];
+  
+        if (Array.isArray(val)) {
+          for (const item of val) {
+            if (typeof item === 'object' && item !== null) {
+              if (!('value' in item)) {
+                throw new Error(
+                  `Data condition for key "${key}" must include a 'value' property. Received: ${JSON.stringify(item)}`
+                );
+              }
+              conditions.push({
+                value: String(item.value),
+                type: item.matchType !== undefined
+                  ? item.matchType
+                  : Client.MatchType.Wildcard
+              });
+            } else {
+              conditions.push({
+                value: String(item),
+                type: Client.MatchType.Wildcard
+              });
+            }
+          }
+        } else if (typeof val === 'object' && val !== null) {
+          if (!('value' in val)) {
+            throw new Error(
+              `Data condition for key "${key}" must include a 'value' property. Received: ${JSON.stringify(val)}`
+            );
+          }
+          conditions.push({
+            value: String(val.value),
+            type: val.matchType !== undefined
+              ? val.matchType
+              : Client.MatchType.Wildcard
+          });
+        } else {
+          conditions.push({
+            value: String(val),
+            type: Client.MatchType.Wildcard
+          });
+        }
+  
+        dataConds[key] = { conditions };
+      }
+      baseQuery.dataConditions = dataConds;
+    }
+  
+    return EventQuery.create(baseQuery);
   }
-
-  return EventQuery.create(baseQuery);
-}
-
-
-
 }
 
 module.exports = Client;

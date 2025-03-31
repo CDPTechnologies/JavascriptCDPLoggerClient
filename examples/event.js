@@ -12,16 +12,16 @@ async function main() {
     const query = {
       senderConditions: [
         {
-          value: "CDPLoggerDemoApp.I*", // Wildcard pattern for sender
-          matchType: "wildcard"
+          value: "CDPLoggerDemoApp.InvalidLicense",
+          matchType: Client.MatchType.Exact
         }
       ],
       dataConditions: {
         "Text": {
-          value: "*", 
-          matchType: "wildcard"
+          value: "*", // Default Wildcard
         }
-      }
+      },
+        flags: Client.EventQueryFlags.NewestFirst | Client.EventQueryFlags.UseLogStampForTimeRange,
     };
     
     
