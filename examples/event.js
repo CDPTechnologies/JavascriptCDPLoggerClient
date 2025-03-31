@@ -1,8 +1,6 @@
 // event.js
 // An example script to see filtered events
-
 const Client = require('../client');
-const root = require('../generated/containerPb');
 
 async function main() {
   const client = new Client('ws://127.0.0.1:17000', false);
@@ -12,15 +10,22 @@ async function main() {
     await new Promise(resolve => setTimeout(resolve, 2000));
     
     const query = {
-      timeRangeBegin: Math.floor(Date.now() / 1000) - (24 * 60 * 60), // Last 24 hours
-      timeRangeEnd: Math.floor(Date.now() / 1000),
-      limit: 50,
-      offset: 0,
-      senderConditions: ["CDPLoggerDemoApp.CDP.CDPEngine"],
+      senderConditions: [
+        {
+          value: "CDPLoggerDemoApp.I*", // Wildcard pattern for sender
+          matchType: "wildcard"
+        }
+      ],
       dataConditions: {
-        "Text": "Component CDPLoggerDemoApp.Sine has been suspended"
+        "Text": {
+          value: "*", 
+          matchType: "wildcard"
+        }
       }
     };
+    
+    
+    
 
     console.log("Sending event query...");
     console.log("Query:", JSON.stringify(query, null, 2));
