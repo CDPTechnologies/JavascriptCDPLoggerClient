@@ -112,21 +112,21 @@ class Client {
    * to ensure compatibility with certain features.
    *
    *   Version History:
-  * - 3.0 (2017-08, CDP 4.3): Minimum supported version.
-  * - 3.1 (2020-08, CDP 4.9):
-  *     - Support for reading full resolution data by setting num_of_datapoints to 0.
-  *     - Added a limit argument to SignalDataRequest (behaves like SQL LIMIT, where 0 means no limit).
-  *     - The server now notifies of dropped queries by returning a TooManyRequests error
-  *       when too many pending requests exist.
-  * - 3.2 (2022-11, CDP 4.11): Limits queries to 50,000 rows to avoid overloading the logger app;
-  *     larger data sets should be downloaded in patches.
-  * - 4.0 (2024-01, CDP 4.12):
-  *     - Added NodeTag support to save custom tags for logged values (e.g. Unit or Description),
-  *       accessible through the NodeInfo struct and TagMap protobuf message.
-  *     - Reduced network usage on the built-in server by having SignalDataResponse
-  *       only include changes instead of repeating unchanged values.
-  *     - Added support for string values and events.
-  *
+   * - 3.0 (2017-08, CDP 4.3): Minimum supported version.
+   * - 3.1 (2020-08, CDP 4.9):
+   *     - Support for reading full resolution data by setting num_of_datapoints to 0.
+   *     - Added a limit argument to SignalDataRequest (behaves like SQL LIMIT, where 0 means no limit).
+   *     - The server now notifies of dropped queries by returning a TooManyRequests error
+   *       when too many pending requests exist.
+   * - 3.2 (2022-11, CDP 4.11): Limits queries to 50,000 rows to avoid overloading the logger app;
+   *     larger data sets should be downloaded in patches.
+   * - 4.0 (2024-01, CDP 4.12):
+   *     - Added NodeTag support to save custom tags for logged values (e.g. Unit or Description),
+   *       accessible through the NodeInfo struct and TagMap protobuf message.
+   *     - Reduced network usage on the built-in server by having SignalDataResponse
+   *       only include changes instead of repeating unchanged values.
+   *     - Added support for string values and events.
+   *
    * @returns {Promise<string>} A promise that resolves with the version string
    *   (e.g., "4.5.2"). If the version is below 3.0, the promise is rejected with
    *   an error indicating an incompatible version.
@@ -870,10 +870,10 @@ class Client {
   _buildEventQuery(query) {
     // Validate the query object before building the EventQuery.
     this._validateEventQuery(query);
-  
+
     const root = require('./generated/containerPb.js');
     const { EventQuery } = root.DBMessaging.Protobuf;
-  
+
     // Conditionally include these fields only if the user has set them
     const optionalFields = [
       "timeRangeBegin",
@@ -883,7 +883,7 @@ class Client {
       "offset",
       "flags"
     ];
-  
+
     // Build a base query object that includes only the fields provided
     const baseQuery = {};
     optionalFields.forEach(field => {
@@ -891,7 +891,7 @@ class Client {
         baseQuery[field] = query[field];
       }
     });
-  
+
     // Build senderConditions if present
     if (query.senderConditions && query.senderConditions.length > 0) {
       baseQuery.senderConditions = {
@@ -917,14 +917,14 @@ class Client {
         })
       };
     }
-  
+
     // Build data conditions if present
     if (query.dataConditions) {
       const dataConds = {};
       for (const key in query.dataConditions) {
         const val = query.dataConditions[key];
         const conditions = [];
-  
+
         if (Array.isArray(val)) {
           for (const item of val) {
             if (typeof item === 'object' && item !== null) {
@@ -964,12 +964,12 @@ class Client {
             type: Client.MatchType.Wildcard
           });
         }
-  
+
         dataConds[key] = { conditions };
       }
       baseQuery.dataConditions = dataConds;
     }
-  
+
     return EventQuery.create(baseQuery);
   }
 }
