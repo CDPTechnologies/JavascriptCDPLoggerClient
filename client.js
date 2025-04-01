@@ -38,30 +38,35 @@ class Client {
     if (!/^wss?:\/\//.test(url)) {
       url = `ws://${url}`;
     }
-
+  
     this.reqId = -1;
     this.autoReconnect = autoReconnect;
     this.enableTimeSync = true; // Time synchronization is enabled by default.
-
+  
     this.isOpen = false;
     this.queuedRequests = {};
     this.storedPromises = {};
     this.nameToId = {};
     this.idToName = {};
-
+  
     // Mapping for signal types (in case we need to interpret values).
     this.nameToType = {};
-
+  
     // Time-diff related
     this.timeDiff = 0;
     this.timeReceived = null;
     this.lastTimeRequest = Date.now() / 1000;
     this.haveSentQueuedReq = false;
     this.roundTripTimes = {};
-
+  
+    // Initialize the cache for sender tags and pending tag requests.
+    this.senderTags = {};           // Cache for event sender tags (keyed by sender)
+    this.pendingSenderTags = {};    // Holds pending promises for sender tags
+  
     // Create the WebSocket connection
     this.ws = this._connect(url);
   }
+  
 
   /**
    * Enable or disable time synchronization with the server.
@@ -114,17 +119,16 @@ class Client {
    *   Version History:
    * - 3.0 (2017-08, CDP 4.3): Minimum supported version.
    * - 3.1 (2020-08, CDP 4.9):
-   *     - Support for reading full resolution data by setting num_of_datapoints to 0.
-   *     - Added a limit argument to SignalDataRequest (behaves like SQL LIMIT, where 0 means no limit).
+   *     - Support for reading full resolution data by setting noOfDataPoints to 0.
+   *     - Added a limit argument to data point requests (behaves like SQL LIMIT, where 0 means no limit).
    *     - The server now notifies of dropped queries by returning a TooManyRequests error
    *       when too many pending requests exist.
    * - 3.2 (2022-11, CDP 4.11): Limits queries to 50,000 rows to avoid overloading the logger app;
    *     larger data sets should be downloaded in patches.
    * - 4.0 (2024-01, CDP 4.12):
    *     - Added NodeTag support to save custom tags for logged values (e.g. Unit or Description),
-   *       accessible through the NodeInfo struct and TagMap protobuf message.
-   *     - Reduced network usage on the built-in server by having SignalDataResponse
-   *       only include changes instead of repeating unchanged values.
+   *       accessible via the client’s API.
+   *     - Reduced network usage by having data responses only include changes instead of repeating unchanged values.
    *     - Added support for string values and events.
    *
    * @returns {Promise<string>} A promise that resolves with the version string
@@ -211,26 +215,26 @@ class Client {
    *     the data to roughly that many points across [startS..endS].
    *   - If you set it to 0, the server returns the data at full resolution
    *     (i.e., no decimation).
+   * @param {number} limit - Similar to SQL LIMIT. It allows you to request data 
+   *    in batches by setting the maximum batch size (the number of samples). 
+   *    Note, reading data in larger batches will improve performance but also allocate more memory.
    * @returns {Promise<Array>} A promise that resolves with an array of objects,
    *   where each object has:
    *   - `timestamp` (number): The time (in seconds) for the data row.
    *   - `value` (object): A key-value mapping of node names to an object with
    *       `min`, `max`, and `last` properties representing the node's values
    *       at that timestamp.
-   * @param {number} limit - Similar to SQL LIMIT. It allows to request data 
-   *    in batches by setting the maximum batch size (the number of samples). 
-   *    Note, reading data in larger batches will improve performance but also allocate more memory.
    */
-  requestDataPoints(nodeNames, startS, endS, noOfDataPoints) {
+  requestDataPoints(nodeNames, startS, endS, noOfDataPoints, limit) {
     this._timeRequest();
     const requestId = this._getRequestId();
     const promise = new Promise((resolve, reject) => {
       this.storedPromises[requestId] = { resolve, reject };
     });
     if (!this.isOpen) {
-      this.queuedRequests[requestId] = ["node_values", nodeNames, startS, endS, noOfDataPoints];
+      this.queuedRequests[requestId] = ["node_values", nodeNames, startS, endS, noOfDataPoints, limit];
     } else {
-      this._reqDataPoints(nodeNames, startS, endS, noOfDataPoints, requestId);
+      this._reqDataPoints(nodeNames, startS, endS, noOfDataPoints, limit, requestId);
     }
     return promise;
   }
@@ -253,15 +257,15 @@ class Client {
    *   https://cdpstudio.com/manual/cdp/cdp2sql/logmanager-eventquery.html#Flags-enum
    *   https://cdpstudio.com/manual/cdp/cdplogger/eventlogreader.html#cdp-event-code-flags
    *
-   * Example usage:
-   *   // Filter for events with sender exactly "CDPLoggerDemoApp.InvalidLicense":
-   *   { senderConditions: ["CDPLoggerDemoApp.InvalidLicense"] }
-   *
-   *   // Filter for events where the "Text" data field equals "Invalid or missing feature license detected.":
-   *   { dataConditions: { "Text": "Invalid or missing feature license detected." } }
-   *
-   * @param {Object} query - A simple plain object representing the EventQuery.
-   * @returns {Promise<Array>} Resolves with an array of event objects.
+   * Allowed query keys:
+   * - timeRangeBegin (number)
+   * - timeRangeEnd (number)
+   * - limit (number)
+   * - offset (number)
+   * - codeMask (number)
+   * - flags (number)
+   * - senderConditions (array)
+   * - dataConditions (object)
    *
    * Each event object typically includes the following fields:
    *  - `sender` (string): The event sender.
@@ -275,17 +279,78 @@ class Client {
    *  - `code` (number): The raw event code returned by the server.
    *  - `status` (number): The status code associated with the event.
    *  - `logstampSec` (number): The log timestamp (in seconds) when the event was logged.
+   * 
+   * Example usage:
+   * client.requestEvents({
+   *   timeRangeBegin: 1609459200,
+   *   timeRangeEnd: 1609545600,
+   *   senderConditions: ["CDPLoggerDemoApp.InvalidLicense"],
+   *   dataConditions: {
+   *     Text: ["Invalid or missing feature license detected."],
+   *     // Multiple data conditions can be specified:
+   *     Level: { value: "ERROR", matchType: Client.MatchType.Exact }
+   *   },
+   *   limit: 100,
+   *   offset: 0,
+   *   flags: Client.EventQueryFlags.NewestFirst
+   * });
+   * 
+   * @param {Object} query - A simple plain object representing the EventQuery.
+   * @returns {Promise<Array>} Resolves with an array of event objects.
    */
-  requestEvents(query) {
+// Modified requestEvents() to wait for missing sender tag info.
+requestEvents(query) {
+  this._timeRequest();
+  const requestId = this._getRequestId();
+  const eventQuery = this._buildEventQuery(query);
+  if (!this.isOpen) {
+    this.queuedRequests[requestId] = { type: "events", query: eventQuery };
+  } else {
+    this._sendEventsRequest(requestId, eventQuery);
+  }
+  return new Promise((resolve, reject) => {
+    this.storedPromises[requestId] = { resolve, reject };
+  })
+  .then(events => {
+    // Collect the unique sender names from events that lack cached tags.
+    const missingSenders = Array.from(new Set(
+      events
+        .filter(evt => !this.senderTags[evt.sender])
+        .map(evt => evt.sender)
+    ));
+
+    if (missingSenders.length === 0) {
+      return events;
+    }
+    // Request tag info for all missing senders.
+    return Promise.all(
+      missingSenders.map(sender => this.getSenderTags(sender))
+    ).then(() => {
+      // Attach tags to events after tag info is available.
+      events.forEach(evt => {
+        evt.tags = this.senderTags[evt.sender];
+      });
+      return events;
+    });
+  });
+}
+
+  /**
+   * Request a count of events that match the given query.
+   *
+   * The query object accepts the same keys as in requestEvents().
+   *
+   * @param {Object} query - The event query object.
+   * @returns {Promise<number>} A promise that resolves with the count of events.
+   */
+  countEvents(query) {
     this._timeRequest();
     const requestId = this._getRequestId();
-    // Convert the simple query into a proper EventQuery message.
     const eventQuery = this._buildEventQuery(query);
-
     if (!this.isOpen) {
-      this.queuedRequests[requestId] = { type: "events", query: eventQuery };
+      this.queuedRequests[requestId] = { type: "countEvents", query: eventQuery };
     } else {
-      this._sendEventsRequest(requestId, eventQuery);
+      this._sendCountEventsRequest(requestId, eventQuery);
     }
     return new Promise((resolve, reject) => {
       this.storedPromises[requestId] = { resolve, reject };
@@ -304,7 +369,7 @@ class Client {
    *   0x100      = SourceObjectUnavailable
    *   0x40000000 = NodeBoot
    *
-   * @param {number} code - The event code from an eEventsResponse.
+   * @param {number} code - The event code from an events response.
    * @returns {string} - A human-readable combination of flags, 
    *   such as "AlarmSet + SourceObjectUnavailable".
    */
@@ -332,10 +397,7 @@ class Client {
    * @returns {string} - The corresponding event code string.
    */
   getEventCodeString(code) {
-    // Return empty string if eventCode is zero
     if (code === 0) return "";
-
-    // Define the flag values
     const EventCodeFlags = {
       AlarmSet: 0x1,
       AlarmClr: 0x2,
@@ -373,6 +435,40 @@ class Client {
       s += (s ? "+" : "") + "SourceObjectUnavailable";
 
     return s;
+  }
+
+/**
+ * Retrieves the tags associated with a given sender.
+ *
+ * This method checks if the tags for the specified sender are already cached. If so, it returns a 
+ * resolved promise with the cached tags. Otherwise, it initializes a pending promise for the sender,
+ * sends a request for the sender's tags using `_sendEventSenderTagsRequest`, and returns a promise that
+ * resolves when the tags are received. If no response is received within 5000 ms, it falls back to resolving
+ * with an empty object.
+ *
+ * @param {string} sender - The identifier of the event sender.
+ * @returns {Promise<Object>} A promise that resolves with an object representing the tags for the sender.
+ */
+  getSenderTags(sender) {
+    if (this.senderTags && this.senderTags[sender]) {
+      return Promise.resolve(this.senderTags[sender]);
+    }
+    // If no pending promise for this sender, initialize one and trigger a request.
+    if (!this.pendingSenderTags[sender]) {
+      this.pendingSenderTags[sender] = [];
+      this._sendEventSenderTagsRequest(sender);
+    }
+    return new Promise(resolve => {
+      this.pendingSenderTags[sender].push(resolve);
+      // Increase timeout to 5000 ms to wait longer for tag info.
+      setTimeout(() => {
+        if (this.pendingSenderTags[sender]) {
+          this.senderTags[sender] = {}; // Fallback to empty object.
+          this.pendingSenderTags[sender].forEach(fn => fn({}));
+          delete this.pendingSenderTags[sender];
+        }
+      }, 5000);
+    });
   }
 
 
@@ -550,6 +646,14 @@ class Client {
         if (data.eventsResponse.events && data.eventsResponse.events.length > 0) {
           data.eventsResponse.events.forEach(evt => {
             evt.codeDescription = this.getEventCodeDescription(evt.code);
+            // If we already have cached tags for this sender, attach them;
+            // otherwise, request them.
+            if (this.senderTags && this.senderTags[evt.sender]) {
+              evt.tags = this.senderTags[evt.sender];
+            } else {
+              // Request sender tags asynchronously.
+              this._sendEventSenderTagsRequest(evt.sender);
+            }
           });
         }
         if (this.storedPromises[data.eventsResponse.requestId]) {
@@ -559,7 +663,33 @@ class Client {
         }
         break;
       }
+      
 
+      case Container.Type.eCountEventsResponse: {
+        if (this.storedPromises[data.countEventsResponse.requestId]) {
+          const { resolve } = this.storedPromises[data.countEventsResponse.requestId];
+          delete this.storedPromises[data.countEventsResponse.requestId];
+          resolve(data.countEventsResponse.count);
+        }
+        break;
+      }
+      
+      case Container.Type.eEventSenderTagsResponse: {
+        // Get the mapping of sender names to TagMap objects.
+        const tagsMapping = data.eventSenderTagsResponse.senderTags;
+        // Iterate over each sender in the mapping.
+        for (const sender in tagsMapping) {
+          const tags = this._convertTagMap(tagsMapping[sender]);
+          this.senderTags[sender] = tags;
+          // Resolve any pending promises waiting for tags for this sender.
+          if (this.pendingSenderTags[sender]) {
+            this.pendingSenderTags[sender].forEach(resolveFn => resolveFn(tags));
+            delete this.pendingSenderTags[sender];
+          }
+        }
+        break;
+      }
+      
       default:
         console.error("Unknown message type", data.messageType);
     }
@@ -567,10 +697,10 @@ class Client {
 
   _convertTagMap(tagMapObj) {
     const result = {};
-    if (!tagMapObj || !tagMapObj.tags) {
-      return result;
-    }
-    for (const [tagKey, tagInfo] of Object.entries(tagMapObj.tags)) {
+    if (!tagMapObj) return result;
+    // If the tag map is nested under 'tags', use that; otherwise, use tagMapObj directly.
+    const entries = tagMapObj.tags || tagMapObj;
+    for (const [tagKey, tagInfo] of Object.entries(entries)) {
       result[tagKey] = {
         value: tagInfo.value,
         source: tagInfo.source
@@ -601,7 +731,6 @@ class Client {
     }
     return value;
   }
-
 
   _valueFromVariant(variant, type) {
     if (!variant) return null;
@@ -643,7 +772,7 @@ class Client {
       } else if (req === "log_limits") {
         this._sendLogLimitsRequest(requestId);
       } else if (Array.isArray(req) && req[0] === "node_values") {
-        this._reqDataPoints(req[1], req[2], req[3], req[4], requestId);
+        this._reqDataPoints(req[1], req[2], req[3], req[4], req[5], requestId);
       } else if (req === "api_version") {
         this._sendApiVersionRequest(requestId);
       } else if (req && req.type === "events") {
@@ -735,9 +864,9 @@ class Client {
     this.ws.send(buffer);
   }
 
-  _reqDataPoints(nodeNames, startS, endS, noOfDataPoints, requestId) {
+  _reqDataPoints(nodeNames, startS, endS, noOfDataPoints, limit, requestId) {
     const _getDataPoints = (nodeIds) => {
-      this._sendDataPointsRequest(nodeIds, startS, endS, requestId, noOfDataPoints);
+      this._sendDataPointsRequest(nodeIds, startS, endS, requestId, limit, noOfDataPoints);
     };
 
     const rejectRequest = (error) => {
@@ -779,12 +908,13 @@ class Client {
     });
   }
 
-  _sendDataPointsRequest(nodeIds, startS, endS, requestId, noOfDataPoints) {
+  _sendDataPointsRequest(nodeIds, startS, endS, requestId, limit, noOfDataPoints) {
     const container = Container.create();
     container.messageType = Container.Type.eSignalDataRequest;
     container.signalDataRequest = {
       requestId,
       signalId: nodeIds,
+      limit,
       numOfDatapoints: noOfDataPoints,
       criterionMin: this.enableTimeSync ? (startS - this.timeDiff) : startS,
       criterionMax: this.enableTimeSync ? (endS - this.timeDiff) : endS
@@ -809,6 +939,22 @@ class Client {
     this.ws.send(buffer);
   }
 
+  _sendCountEventsRequest(requestId, query) {
+    const container = Container.create();
+    container.messageType = Container.Type.eCountEventsRequest;
+    container.countEventsRequest = { requestId, query };
+    const buffer = Container.encode(container).finish();
+    this.ws.send(buffer);
+  }  
+
+  _sendEventSenderTagsRequest(sender) {
+    const container = Container.create();
+    container.messageType = Container.Type.eEventSenderTagsRequest;
+    // Use a new requestId so the server can reply with a proper EventSenderTagsResponse.
+    container.eventSenderTagsRequest = { requestId: this._getRequestId(), sender };
+    const buffer = Container.encode(container).finish();
+    this.ws.send(buffer);
+  }
 
   /**
    * Helper method to validate the event query object.
@@ -858,13 +1004,13 @@ class Client {
   }
 
   /**
-   * Helper method to build a proper EventQuery message from a simple plain object.
+   * Helper method to build a proper EventQuery object from a simple plain object.
    *
-   * The returned `EventQuery` is used by `requestEvents()` to query 
+   * The returned query object is used by `requestEvents()` to query 
    * the CDPLogger or LogServer for matching events.
    *
    * @param {Object} query - The simple plain object query.
-   * @returns {DBMessaging.Protobuf.EventQuery} - The built EventQuery message.
+   * @returns {DBMessaging.Protobuf.EventQuery} - The structured EventQuery.
    * @throws {Error} If a condition object is missing required properties.
    */
   _buildEventQuery(query) {
