@@ -38,35 +38,35 @@ class Client {
     if (!/^wss?:\/\//.test(url)) {
       url = `ws://${url}`;
     }
-  
+
     this.reqId = -1;
     this.autoReconnect = autoReconnect;
     this.enableTimeSync = true; // Time synchronization is enabled by default.
-  
+
     this.isOpen = false;
     this.queuedRequests = {};
     this.storedPromises = {};
     this.nameToId = {};
     this.idToName = {};
-  
+
     // Mapping for signal types (in case we need to interpret values).
     this.nameToType = {};
-  
+
     // Time-diff related
     this.timeDiff = 0;
     this.timeReceived = null;
     this.lastTimeRequest = Date.now() / 1000;
     this.haveSentQueuedReq = false;
     this.roundTripTimes = {};
-  
+
     // Initialize the cache for sender tags and pending tag requests.
     this.senderTags = {};           // Cache for event sender tags (keyed by sender)
     this.pendingSenderTags = {};    // Holds pending promises for sender tags
-  
+
     // Create the WebSocket connection
     this.ws = this._connect(url);
   }
-  
+
 
   /**
    * Enable or disable time synchronization with the server.
@@ -298,42 +298,42 @@ class Client {
    * @param {Object} query - A simple plain object representing the EventQuery.
    * @returns {Promise<Array>} Resolves with an array of event objects.
    */
-// Modified requestEvents() to wait for missing sender tag info.
-requestEvents(query) {
-  this._timeRequest();
-  const requestId = this._getRequestId();
-  const eventQuery = this._buildEventQuery(query);
-  if (!this.isOpen) {
-    this.queuedRequests[requestId] = { type: "events", query: eventQuery };
-  } else {
-    this._sendEventsRequest(requestId, eventQuery);
-  }
-  return new Promise((resolve, reject) => {
-    this.storedPromises[requestId] = { resolve, reject };
-  })
-  .then(events => {
-    // Collect the unique sender names from events that lack cached tags.
-    const missingSenders = Array.from(new Set(
-      events
-        .filter(evt => !this.senderTags[evt.sender])
-        .map(evt => evt.sender)
-    ));
-
-    if (missingSenders.length === 0) {
-      return events;
+  // Modified requestEvents() to wait for missing sender tag info.
+  requestEvents(query) {
+    this._timeRequest();
+    const requestId = this._getRequestId();
+    const eventQuery = this._buildEventQuery(query);
+    if (!this.isOpen) {
+      this.queuedRequests[requestId] = { type: "events", query: eventQuery };
+    } else {
+      this._sendEventsRequest(requestId, eventQuery);
     }
-    // Request tag info for all missing senders.
-    return Promise.all(
-      missingSenders.map(sender => this.getSenderTags(sender))
-    ).then(() => {
-      // Attach tags to events after tag info is available.
-      events.forEach(evt => {
-        evt.tags = this.senderTags[evt.sender];
+    return new Promise((resolve, reject) => {
+      this.storedPromises[requestId] = { resolve, reject };
+    })
+      .then(events => {
+        // Collect the unique sender names from events that lack cached tags.
+        const missingSenders = Array.from(new Set(
+          events
+            .filter(evt => !this.senderTags[evt.sender])
+            .map(evt => evt.sender)
+        ));
+
+        if (missingSenders.length === 0) {
+          return events;
+        }
+        // Request tag info for all missing senders.
+        return Promise.all(
+          missingSenders.map(sender => this.getSenderTags(sender))
+        ).then(() => {
+          // Attach tags to events after tag info is available.
+          events.forEach(evt => {
+            evt.tags = this.senderTags[evt.sender];
+          });
+          return events;
+        });
       });
-      return events;
-    });
-  });
-}
+  }
 
   /**
    * Request a count of events that match the given query.
@@ -437,18 +437,18 @@ requestEvents(query) {
     return s;
   }
 
-/**
- * Retrieves the tags associated with a given sender.
- *
- * This method checks if the tags for the specified sender are already cached. If so, it returns a 
- * resolved promise with the cached tags. Otherwise, it initializes a pending promise for the sender,
- * sends a request for the sender's tags using `_sendEventSenderTagsRequest`, and returns a promise that
- * resolves when the tags are received. If no response is received within 5000 ms, it falls back to resolving
- * with an empty object.
- *
- * @param {string} sender - The identifier of the event sender.
- * @returns {Promise<Object>} A promise that resolves with an object representing the tags for the sender.
- */
+  /**
+   * Retrieves the tags associated with a given sender.
+   *
+   * This method checks if the tags for the specified sender are already cached. If so, it returns a 
+   * resolved promise with the cached tags. Otherwise, it initializes a pending promise for the sender,
+   * sends a request for the sender's tags using `_sendEventSenderTagsRequest`, and returns a promise that
+   * resolves when the tags are received. If no response is received within 5000 ms, it falls back to resolving
+   * with an empty object.
+   *
+   * @param {string} sender - The identifier of the event sender.
+   * @returns {Promise<Object>} A promise that resolves with an object representing the tags for the sender.
+   */
   getSenderTags(sender) {
     if (this.senderTags && this.senderTags[sender]) {
       return Promise.resolve(this.senderTags[sender]);
@@ -458,16 +458,8 @@ requestEvents(query) {
       this.pendingSenderTags[sender] = [];
       this._sendEventSenderTagsRequest(sender);
     }
-    return new Promise(resolve => {
-      this.pendingSenderTags[sender].push(resolve);
-      // Increase timeout to 5000 ms to wait longer for tag info.
-      setTimeout(() => {
-        if (this.pendingSenderTags[sender]) {
-          this.senderTags[sender] = {}; // Fallback to empty object.
-          this.pendingSenderTags[sender].forEach(fn => fn({}));
-          delete this.pendingSenderTags[sender];
-        }
-      }, 5000);
+    return new Promise((resolve, reject) => {
+      this.pendingSenderTags[sender].push({ resolve, reject });
     });
   }
 
@@ -497,14 +489,20 @@ requestEvents(query) {
     if (!error) {
       error = new Error("Something went wrong");
     }
-    if (!this.autoReconnect) {
-      for (const key in this.storedPromises) {
-        this.storedPromises[key].reject(error);
-      }
-      this.storedPromises = {};
-      this.queuedRequests = {};
+    // Reject all stored promises.
+    for (const key in this.storedPromises) {
+      this.storedPromises[key].reject(error);
+    }
+    this.storedPromises = {};
+    this.queuedRequests = {};
+    
+    // Reject any pending sender tag promises.
+    for (const sender in this.pendingSenderTags) {
+      this.pendingSenderTags[sender].forEach(promiseObj => promiseObj.reject(error));
+      delete this.pendingSenderTags[sender];
     }
   }
+  
 
   _onClose(ws) {
     this.isOpen = false;
@@ -663,7 +661,7 @@ requestEvents(query) {
         }
         break;
       }
-      
+
 
       case Container.Type.eCountEventsResponse: {
         if (this.storedPromises[data.countEventsResponse.requestId]) {
@@ -673,7 +671,7 @@ requestEvents(query) {
         }
         break;
       }
-      
+
       case Container.Type.eEventSenderTagsResponse: {
         // Get the mapping of sender names to TagMap objects.
         const tagsMapping = data.eventSenderTagsResponse.senderTags;
@@ -683,13 +681,14 @@ requestEvents(query) {
           this.senderTags[sender] = tags;
           // Resolve any pending promises waiting for tags for this sender.
           if (this.pendingSenderTags[sender]) {
-            this.pendingSenderTags[sender].forEach(resolveFn => resolveFn(tags));
+            this.pendingSenderTags[sender].forEach(promiseObj => promiseObj.resolve(tags));
             delete this.pendingSenderTags[sender];
           }
         }
         break;
       }
-      
+
+
       default:
         console.error("Unknown message type", data.messageType);
     }
@@ -945,7 +944,7 @@ requestEvents(query) {
     container.countEventsRequest = { requestId, query };
     const buffer = Container.encode(container).finish();
     this.ws.send(buffer);
-  }  
+  }
 
   _sendEventSenderTagsRequest(sender) {
     const container = Container.create();

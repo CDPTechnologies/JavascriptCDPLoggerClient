@@ -1,6 +1,5 @@
 // fakeData.js
 
-// Define a simple Container object to simulate our protobuf types.
 const Container = {
   Type: {
     eSignalInfoRequest: 1,
@@ -101,7 +100,6 @@ function createErrorResponse() {
   };
 }
 
-
 function createRealisticEventsResponse(requestId = 1) {
   return {
     messageType: Container.Type.eEventsResponse,
@@ -113,10 +111,10 @@ function createRealisticEventsResponse(requestId = 1) {
           data: {
             Text: "Invalid or missing feature license detected."
           },
-          timestampSec: 1740284241, // ~2025-03-26 08:37:21 UTC
+          timestampSec: 1740284241,
           id: 101,
-          code: 0x1,  // AlarmSet
-          status: 1,  // Error
+          code: 0x1,
+          status: 1,
           logstampSec: 1740284241
         },
         {
@@ -124,10 +122,10 @@ function createRealisticEventsResponse(requestId = 1) {
           data: {
             Text: "CDP event notice"
           },
-          timestampSec: 1740284167, // ~2025-03-26 08:36:07
+          timestampSec: 1740284167,
           id: 102,
-          code: 0,   // None
-          status: 3, // Notify
+          code: 0,
+          status: 3,
           logstampSec: 1740284167
         },
         {
@@ -135,10 +133,10 @@ function createRealisticEventsResponse(requestId = 1) {
           data: {
             Text: "A component is suspended"
           },
-          timestampSec: 1740284145, // ~2025-03-26 08:35:45
+          timestampSec: 1740284145,
           id: 103,
-          code: 0x1, // AlarmSet
-          status: 1, // Error
+          code: 0x1,
+          status: 1,
           logstampSec: 1740284145
         },
         {
@@ -146,16 +144,28 @@ function createRealisticEventsResponse(requestId = 1) {
           data: {
             Text: "Component was suspended"
           },
-          timestampSec: 1740284090, // ~2025-03-26 08:34:50
+          timestampSec: 1740284090,
           id: 104,
-          code: 0,   // None
-          status: 2, // Warning
+          code: 0,
+          status: 2,
           logstampSec: 1740284090
         }
       ]
     }
   };
 }
+
+function createEventSenderTagsResponse(sender, tagMap) {
+  return {
+    messageType: Container.Type.eEventSenderTagsResponse,
+    eventSenderTagsResponse: {
+      senderTags: {
+        [sender]: tagMap
+      }
+    }
+  };
+}
+
 
 module.exports = {
   createApiVersionResponse,
@@ -164,6 +174,7 @@ module.exports = {
   createLoggedNodesResponse,
   createDataPointResponse,
   createErrorResponse,
-  createRealisticEventsResponse, // Export our new function
+  createRealisticEventsResponse,
+  createEventSenderTagsResponse,
   Container
 };
