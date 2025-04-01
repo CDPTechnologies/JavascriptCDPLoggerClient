@@ -3,7 +3,6 @@
 A simple JavaScript interface for communicating with CDP applications that include a CDPLogger component to retrieve historic data. 
 For more information about CDP Studio see https://cdpstudio.com/.
 
-
 ## Installation
 
 Clone the repository and install dependencies:
