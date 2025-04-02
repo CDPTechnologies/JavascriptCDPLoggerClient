@@ -1,13 +1,13 @@
 /*global WebSocket*/
 global.WebSocket = require('ws');
-const Client = require('../client');
+const cdplogger = require('../client');
 const fakeData = require('./fakeData');
 
 describe('ClientTester', () => {
   let client;
   beforeEach(() => {
     // Override _connect to return a fake ws object that doesn't actually connect.
-    Client.prototype._connect = function(url) {
+    cdplogger.Client.prototype._connect = function(url) {
       return {
         _url: url,
         close: jest.fn(),
@@ -15,7 +15,7 @@ describe('ClientTester', () => {
       };
     };
     // Create a new client instance.
-    client = new Client('127.0.0.1:17000', true);
+    client = new cdplogger.Client('127.0.0.1:17000', true);
     // By default, disable time sync for most tests.
     client.setEnableTimeSync(false);
     // Adjust lastTimeRequest so that a new time request would normally be triggered.

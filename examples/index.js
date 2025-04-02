@@ -2,7 +2,7 @@
 // Example demonstration including an events query for a specific time range (UTC 9:40)
 
 global.WebSocket = require('ws');
-const Client = require('../client');
+const cdplogger = require('../client');
 
 // Print the node information (name, routing, and tags)
 function printLoggedNodes() {
@@ -64,7 +64,7 @@ async function main() {
 }
 
 // Create a new client instance. (In this example, autoReconnect is disabled.)
-const client = new Client('ws://127.0.0.1:17000', false);
+const client = new cdplogger.Client('ws://127.0.0.1:17000', false);
 
 // Instead of overriding ws.onopen (which may cancel internal logic),
 // add an event listener so that _onOpen is still called.

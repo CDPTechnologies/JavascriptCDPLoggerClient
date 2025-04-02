@@ -2,6 +2,8 @@ const WebSocket = require('ws');
 const root = require('./generated/containerPb.js');
 const Container = root.DBMessaging.Protobuf.Container;
 const CDPValueType = root.ICD.Protobuf.CDPValueType;
+const EventQuery = root.DBMessaging.Protobuf.EventQuery;
+
 
 /**
  * A client for interacting with a CDP Logger or LogServer via WebSocket.
@@ -14,7 +16,7 @@ const CDPValueType = root.ICD.Protobuf.CDPValueType;
 class Client {
   // Defined property names to use instead of ambiguous numbers.
   static EventQueryFlags = Object.freeze({
-    None: 0, // Client.EventQueryFlags.None === 0
+    None: 0, // cdplogger.Client.EventQueryFlags.None === 0
     NewestFirst: 1,
     TimeRangeBeginExclusive: 2,
     TimeRangeEndExclusive: 4,
@@ -288,11 +290,11 @@ class Client {
    *   dataConditions: {
    *     Text: ["Invalid or missing feature license detected."],
    *     // Multiple data conditions can be specified:
-   *     Level: { value: "ERROR", matchType: Client.MatchType.Exact }
+   *     Level: { value: "ERROR", matchType: cdplogger.Client.MatchType.Exact }
    *   },
    *   limit: 100,
    *   offset: 0,
-   *   flags: Client.EventQueryFlags.NewestFirst
+   *   flags: cdplogger.Client.EventQueryFlags.NewestFirst
    * });
    * 
    * @param {Object} query - A simple plain object representing the EventQuery.
@@ -1016,9 +1018,6 @@ class Client {
     // Validate the query object before building the EventQuery.
     this._validateEventQuery(query);
 
-    const root = require('./generated/containerPb.js');
-    const { EventQuery } = root.DBMessaging.Protobuf;
-
     // Conditionally include these fields only if the user has set them
     const optionalFields = [
       "timeRangeBegin",
@@ -1119,4 +1118,7 @@ class Client {
   }
 }
 
-module.exports = Client;
+const cdplogger = {};
+cdplogger.Client = Client;
+
+module.exports = cdplogger;

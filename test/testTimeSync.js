@@ -1,5 +1,5 @@
 // testTimeSync.js
-const Client = require('../client');
+const cdplogger = require('../client');
 const fakeData = require('./fakeData');
 
 // Override WebSocket with a dummy that provides a send() method.
@@ -15,8 +15,8 @@ global.WebSocket = class {
 // --- Capture Request IDs for time sync vs. API calls ---
 let capturedTimeSyncRequestId = null;
 let capturedApiRequestId = null;
-const originalGetRequestId = Client.prototype._getRequestId;
-Client.prototype._getRequestId = function() {
+const originalGetRequestId = cdplogger.Client.prototype._getRequestId;
+cdplogger.Client.prototype._getRequestId = function() {
   const id = originalGetRequestId.call(this);
   if (capturedTimeSyncRequestId === null) {
     capturedTimeSyncRequestId = id;
@@ -77,7 +77,7 @@ async function runThrough(methodName, callFunc, simulateResponse) {
 
 async function runTest() {
   // Create a new client instance.
-  client = new Client('127.0.0.1:17000', true);
+  client = new cdplogger.Client('127.0.0.1:17000', true);
 
   // Override _sendTimeRequest to simulate a server time response with variable delay.
   client._sendTimeRequest = function (requestId) {
