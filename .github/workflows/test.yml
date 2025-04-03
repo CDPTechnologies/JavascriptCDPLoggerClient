@@ -26,6 +26,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Create test directories
+        run: |
+          mkdir -p coverage
+          mkdir -p test-results
+
       - name: Run tests
         run: npm test
 
@@ -36,4 +41,5 @@ jobs:
           name: test-results-${{ matrix.node-version }}
           path: |
             coverage/
-            test-results/ 
+            test-results/
+          if-no-files-found: ignore 
