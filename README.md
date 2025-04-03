@@ -29,16 +29,16 @@ node test/testTimeSync.js
 
 ## Usage
 
-The index.js file contains a simple logger built for the CDP Studio example case.
+The value.js file contains a simple logger built for the CDP Studio example case.
 
 1. Set up and run the Logger in CDP Studio.
 (Refer to Help → Framework - Data Logging → How to Setup Logging in Automation System)
 https://cdpstudio.com/manual/cdp/cdplogger/cdplogger-configuration-example.html
 
-2. Run the index.js file from the command line:
+2. Run the value.js file from the command line:
 
 ```bash
-node examples/index.js
+node examples/value.js
 ```
 
 For usage related to events run:

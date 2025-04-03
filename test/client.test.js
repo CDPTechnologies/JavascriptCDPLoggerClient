@@ -106,12 +106,12 @@ describe('ClientTester', () => {
     setImmediate(() => {
       expect(client._sendTimeRequest).toHaveBeenCalledWith(1);
       expect(client._sendDataPointsRequest).toHaveBeenCalledWith(
-        [0, 1],
-        1530613239.0,
-        1530613270.0,
-        2,      // The second call's requestId
-        500,    // limit
-        0       // noOfDataPoints
+        [0, 1],           // nodeIds
+        1530613239.0,     // startS
+        1530613270.0,     // endS
+        2,                // requestId
+        0,                // noOfDataPoints
+        500               // limit
       );
       done();
     });
@@ -198,7 +198,7 @@ describe('ClientTester', () => {
     client.reqId = 0;
     client.isOpen = true;
     client._sendDataPointsRequest = jest.fn();
-    client.requestDataPoints(["Output", "CPULoad"], 1531313250.0, 1531461231.0, 0, 500)
+    client.requestDataPoints(["Output", "CPULoad"], 1531313250.0, 1531461231.0, 500, 0)
       .then(dataPoints => {
         expect(dataPoints[0].timestamp).toBeCloseTo(1531313250.0);
         expect(dataPoints[0].value["Output"].min).toBeCloseTo(0.638855091434);
@@ -220,7 +220,7 @@ describe('ClientTester', () => {
         delete client.idToName[id];
       }
     }
-    client.requestDataPoints(["Output", "CPULoad"], 1531313250.0, 1531461231.0, 0, 500)
+    client.requestDataPoints(["Output", "CPULoad"], 1531313250.0, 1531461231.0, 500, 0)
       .catch(error => {
         expect(error).toBeInstanceOf(Error);
         expect(error.message).toMatch(/Output/);

@@ -171,7 +171,7 @@ async function runTest() {
 
   await runThrough(
     "requestDataPoints",
-    () => client.requestDataPoints(["Output", "CPULoad"], 1531313250.0, 1531461231.0, 500),
+    () => client.requestDataPoints(["Output", "CPULoad"], 1531313250.0, 1531461231.0, 0, 500),
     (timeSyncId, apiId) => {
       const timeResponse = {
         messageType: fakeData.Container.Type.eTimeResponse,

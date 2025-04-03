@@ -40,6 +40,10 @@ class Client {
     if (!/^wss?:\/\//.test(url)) {
       url = `ws://${url}`;
     }
+    // Same for ":17000"
+    if (!/\:17000$/.test(url)) {
+      url += ':17000';
+    }
 
     this.reqId = -1;
     this.autoReconnect = autoReconnect;
@@ -85,7 +89,7 @@ class Client {
   setEnableTimeSync(enable) {
     this.enableTimeSync = enable;
     if (!enable) {
-      // Cancel any pending time sync requests so they won’t update timeDiff later.
+      // Cancel any pending time sync requests so they won't update timeDiff later.
       for (const key in this.storedPromises) {
         this.storedPromises[key].reject(new Error("Time sync disabled"));
       }
@@ -129,7 +133,7 @@ class Client {
    *     larger data sets should be downloaded in patches.
    * - 4.0 (2024-01, CDP 4.12):
    *     - Added NodeTag support to save custom tags for logged values (e.g. Unit or Description),
-   *       accessible via the client’s API.
+   *       accessible via the client's API.
    *     - Reduced network usage by having data responses only include changes instead of repeating unchanged values.
    *     - Added support for string values and events.
    *
@@ -445,8 +449,7 @@ class Client {
    * This method checks if the tags for the specified sender are already cached. If so, it returns a 
    * resolved promise with the cached tags. Otherwise, it initializes a pending promise for the sender,
    * sends a request for the sender's tags using `_sendEventSenderTagsRequest`, and returns a promise that
-   * resolves when the tags are received. If no response is received within 5000 ms, it falls back to resolving
-   * with an empty object.
+   * resolves when the tags are received.
    *
    * @param {string} sender - The identifier of the event sender.
    * @returns {Promise<Object>} A promise that resolves with an object representing the tags for the sender.
@@ -867,7 +870,7 @@ class Client {
 
   _reqDataPoints(nodeNames, startS, endS, noOfDataPoints, limit, requestId) {
     const _getDataPoints = (nodeIds) => {
-      this._sendDataPointsRequest(nodeIds, startS, endS, requestId, limit, noOfDataPoints);
+      this._sendDataPointsRequest(nodeIds, startS, endS, requestId, noOfDataPoints, limit);
     };
 
     const rejectRequest = (error) => {
@@ -909,7 +912,7 @@ class Client {
     });
   }
 
-  _sendDataPointsRequest(nodeIds, startS, endS, requestId, limit, noOfDataPoints) {
+  _sendDataPointsRequest(nodeIds, startS, endS, requestId, noOfDataPoints, limit) {
     const container = Container.create();
     container.messageType = Container.Type.eSignalDataRequest;
     container.signalDataRequest = {
