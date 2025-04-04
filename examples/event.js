@@ -1,10 +1,13 @@
 // event.js
 // An example script to see filtered events
 
-const Client = require('../client');
+const cdplogger = require('../client');
+
+const { EventQueryFlags, MatchType } = cdplogger.Client;
+
 
 async function main() {
-  const client = new Client('ws://127.0.0.1:17000', false);
+  const client = new cdplogger.Client('127.0.0.1:17000', true);
   
   try {
     console.log("Waiting for connection to establish...");
@@ -13,20 +16,17 @@ async function main() {
     
     // Build the query with a limit and offset
     const query = {
-      senderConditions: [
-        {
-          value: "CDPLoggerDemoApp.InvalidLicense",
-          matchType: Client.MatchType.Exact
-        }
-      ],
+      senderConditions: [{
+        value: "CDPLoggerDemoApp.InvalidLicense",
+        matchType: MatchType.Exact
+      }],
       dataConditions: {
-        "Text": {
-          value: "*", // Wildcard condition for Text field
-        }
+        Text: ["Invalid*"], //Wildcard is the default
+        // Multiple data conditions can be specified
       },
-      flags: Client.EventQueryFlags.NewestFirst | Client.EventQueryFlags.UseLogStampForTimeRange,
-      limit: 10,   // Request a maximum of 10 events
-      offset: 0    // Starting at the beginning
+      limit: 100,
+      offset: 0,
+      flags: EventQueryFlags.NewestFirst | EventQueryFlags.UseLogStampForTimeRange
     };
 
     console.log("Counting matching events...");
