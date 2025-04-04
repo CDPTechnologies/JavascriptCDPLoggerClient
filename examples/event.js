@@ -7,7 +7,7 @@ const { EventQueryFlags, MatchType } = cdplogger.Client;
 
 
 async function main() {
-  const client = new cdplogger.Client('127.0.0.1', true);
+  const client = new cdplogger.Client('127.0.0.1:17000', true);
   
   try {
     console.log("Waiting for connection to establish...");

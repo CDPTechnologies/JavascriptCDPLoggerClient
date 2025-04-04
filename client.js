@@ -40,10 +40,6 @@ class Client {
     if (!/^wss?:\/\//.test(url)) {
       url = `ws://${url}`;
     }
-    // Same for ":17000"
-    if (!/\:17000$/.test(url)) {
-      url += ':17000';
-    }
 
     this.reqId = -1;
     this.autoReconnect = autoReconnect;
