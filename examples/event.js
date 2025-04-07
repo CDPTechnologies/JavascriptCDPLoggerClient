@@ -21,7 +21,7 @@ async function main() {
         matchType: MatchType.Exact
       }],
       dataConditions: {
-        Text: ["Invalid*"], //Wildcard is the default
+        Text: ["Invalid*"], // Wildcard is the default
         // Multiple data conditions can be specified
       },
       limit: 100,
