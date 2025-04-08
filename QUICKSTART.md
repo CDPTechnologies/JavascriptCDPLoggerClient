@@ -4,7 +4,7 @@ This guide demonstrates how to get started with the CDPLogger Client in both **N
 
 ## Documentation
 
-For documentation on the JS logger see [DOCUMENTATION.md](DOCUMENTATION.md)
+For documentation on the JS logger client see [DOCUMENTATION.md](DOCUMENTATION.md)
 
 ## Overview
 
@@ -14,14 +14,14 @@ For documentation on the JS logger see [DOCUMENTATION.md](DOCUMENTATION.md)
   - Requires a WebSocket polyfill (such as the `ws` package) since Node.js lacks a native WebSocket.
 
 - **Browser Version:**
-  - Uses the browser’s native WebSocket.
+  - Uses the browser's native WebSocket.
   - Obtains protobuf definitions from the global scope via `window.root` (set by including `containerPb.js`).
 
 ## Installation
 
 ### For Node.js
 
-Install the CDPLogger Client and a WebSocket polyfill:
+Install the CDPLogger Client and a WebSocket polyfill (for the Node.js version):
 
 ```bash
 npm install cdp-logger-client ws
@@ -38,7 +38,7 @@ Include the following scripts in your HTML:
 
 To enable web support, ensure your `client.js` file includes these modifications:
 
-1. **Use the Browser’s Native WebSocket:**  
+1. **Use the Browser's Native WebSocket:**  
    In the web version, remove or comment out any code that requires a WebSocket polyfill. For example:
    ```js
    // const WebSocket = require('ws'); // Do not use this in the browser
@@ -78,16 +78,33 @@ global.WebSocket = require('ws');
 // Create a client instance (endpoint can be "127.0.0.1:17000" or "ws://127.0.0.1:17000")
 const client = new cdplogger.Client('127.0.0.1:17000');
 
-// Fetch the API version from the CDP Logger
-client.requestApiVersion().then(version => {
-  console.log("CDP Logger API Version:", version);
-});
-
 // List logged nodes (displaying name and routing information)
 client.requestLoggedNodes().then(nodes => {
   nodes.forEach(node => {
     console.log(`Name: ${node.name}, Routing: ${node.routing}`);
   });
+  
+  // If we have nodes, request data points for the first one
+  if (nodes.length > 0) {
+    const nodeName = nodes[0].name;
+    console.log(`\nRequesting data points for node: ${nodeName}`);
+    
+    // Get log limits and request data points
+    client.requestLogLimits().then(limits => {
+      return client.requestDataPoints([nodeName], limits.startS, limits.endS, 10, 0);
+    }).then(dataPoints => {
+      console.log(`\nReceived ${dataPoints.length} data points:`);
+      dataPoints.forEach(point => {
+        console.log(`Timestamp: ${new Date(point.timestamp * 1000).toISOString()}`);
+        if (point.value && point.value[nodeName]) {
+          const val = point.value[nodeName];
+          console.log(`  Min: ${val.min}, Max: ${val.max}, Last: ${val.last}`);
+        }
+      });
+    }).catch(err => {
+      console.error("Error retrieving data points:", err);
+    });
+  }
 });
 
 // Disconnect after a short delay (for demonstration purposes)
@@ -119,25 +136,43 @@ Create an HTML file that includes the necessary scripts. For example:
   <body>
     <script>
       // The client is now available globally as "cdplogger" (attached to window)
-      const client = new cdplogger.Client("ws://127.0.0.1:17000");
-
-      // Fetch the API version from the CDP Logger and log it
-      client.requestApiVersion().then(version => {
-        console.log("CDP Logger API Version:", version);
-      });
+      // Use window.location.hostname to connect to the same host as the web page
+      const client = new cdplogger.Client(window.location.hostname + ":17000");
 
       // List logged nodes and output their names and routings
       client.requestLoggedNodes().then(nodes => {
         nodes.forEach(node => {
           console.log(`Name: ${node.name}, Routing: ${node.routing}`);
         });
+        
+        // If we have nodes, request data points for the first one
+        if (nodes.length > 0) {
+          const nodeName = nodes[0].name;
+          console.log(`\nRequesting data points for node: ${nodeName}`);
+          
+          // Get log limits and request data points
+          client.requestLogLimits().then(limits => {
+            return client.requestDataPoints([nodeName], limits.startS, limits.endS, 10, 0);
+          }).then(dataPoints => {
+            console.log(`\nReceived ${dataPoints.length} data points:`);
+            dataPoints.forEach(point => {
+              console.log(`Timestamp: ${new Date(point.timestamp * 1000).toISOString()}`);
+              if (point.value && point.value[nodeName]) {
+                const val = point.value[nodeName];
+                console.log(`  Min: ${val.min}, Max: ${val.max}, Last: ${val.last}`);
+              }
+            });
+          }).catch(err => {
+            console.error("Error retrieving data points:", err);
+          });
+        }
       });
     </script>
   </body>
 </html>
 ```
 
-*In the browser version, by including `client.js` (with the modifications described above), the client automatically uses the native WebSocket, the global protobuf definitions from `window.root`, and attaches the API to `window.cdplogger`.*
+*In the browser version, we use `window.location.hostname` to connect to the same host as the web page, with the default logger port 17000.*
 
 ## Prerequisites
 

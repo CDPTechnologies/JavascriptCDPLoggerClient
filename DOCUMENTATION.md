@@ -82,7 +82,7 @@ Before using the CDP Logger Client, make sure you have the following:
 
 - **ProtoBuf JS** – The library depends on `protobufjs` (included as an npm dependency). If you installed via npm and are using a bundler or Node, this will be installed automatically. If you are using direct script includes, include the `protobuf.min.js` as shown above.
 
-- **CDP Logger API Compatibility** – As noted, the target CDP Logger should be running a version that supports the queries you need. Basic data queries work on older versions (3.0+), but features like tags and advanced event filtering require newer CDP releases (CDP 4.12 for tags support, etc.). If you’re running an older CDP version and some API calls fail or are not supported, consider upgrading CDP Studio or limiting to the supported features.
+- **CDP Logger API Compatibility** – As noted, the target CDP Logger should be running a version that supports the queries you need. Basic data queries work on older versions (CDP 4.3+), but features like tags and advanced event filtering require newer CDP releases (CDP 4.12 for tags support, etc.). If you’re running an older CDP version and some API calls fail or are not supported, consider upgrading CDP Studio or limiting to the supported features.
 
 ## Setup and Configuration
 
@@ -149,7 +149,6 @@ A few notes on the above example:
 You can also request historical **data points** for one or more signals using `client.requestDataPoints(names, startTimeSec, endTimeSec, numberOfPoints)`. For example:
 
 ```js
-// Assume we got `limits` from requestLogLimits (which provides start and end of log):
 const limits = await client.requestLogLimits();
 const start = limits.startS;
 const end   = limits.endS;
@@ -175,7 +174,7 @@ The above demonstrates retrieving 100 aggregated data points between the earlies
 Finally, to retrieve **events**, you can use `client.requestEvents(query)` along with constructing a query object. You can also use `client.countEvents(query)` to just get the count. Here’s a brief Node example for events:
 
 ```js
-const query = {
+const query = { // Note: all query arguments are optional
   senderConditions: [
     { value: "MyApp.AlarmManager", matchType: MatchType.Exact }
   ],
@@ -183,7 +182,7 @@ const query = {
     // Assume events have a field "Text" and we want those containing "Overheat"
     Text: ["Overheat*"]  // '*' wildcard is the default option
   },
-  timeRangeStart: Date.now()/1000 - 24*3600,  // (optional) last 24 hours in seconds (if time filtering desired)
+  timeRangeStart: Date.now()/1000 - 24*3600,  // last 24 hours in seconds (if time filtering desired)
   limit: 50,      // max 50 events
   offset: 0,      // start from the first match
   flags: EventQueryFlags.NewestFirst  // get newest events first
@@ -218,7 +217,7 @@ Using the client in a browser is similar, except you don’t need to polyfill We
 
 <script>
   // Once scripts are loaded, use the global cdplogger
-  const client = new cdplogger.Client("ws://localhost:17000");  // connect to logger
+  const client = new cdplogger.Client(window.location.hostname + ":17000"); // Connect to logger
   
   // Example: fetch API version
   client.requestApiVersion().then(version => {
@@ -238,11 +237,9 @@ As shown, the usage is very much the same as in Node. The `cdplogger.Client` cla
 
 A few browser-specific notes:
 
-- **Security:** If your CDP Logger is served over HTTPS (or you are accessing it from an HTTPS page), use `wss://` for the WebSocket URL to avoid mixed content issues. Ensure the CDP Logger is configured with TLS if needed. For local testing with `http://localhost` you can use `ws://` without issues.
-
 - **CORS/WebSocket Policy:** WebSocket connections are not subject to the same-origin policy in the way XHR/Fetch are, but some environments might still require the server to accept the connection. The CDP Logger’s WebSocket server should accept connections from any origin by default. If you encounter issues connecting from a web page, check if any firewall or network configuration is blocking the websocket port.
 
-- **Performance:** Retrieving a lot of data points or events in one go can be heavy for the browser. If you plan to visualize large data sets, consider using pagination (e.g., request events 100 at a time using `offset`) or downsampling data points via the `numberOfPoints` parameter. The library itself streams the data efficiently, but rendering thousands of points in the DOM can be slow, so plan accordingly.
+- **Performance:** Retrieving a lot of data points or events in one go can be heavy for the browser. If you plan to visualize large data sets, consider using pagination (e.g., request events 100 at a time using `offset`) or downsampling data points via the `noOfDataPoints` parameter. The library itself streams the data efficiently, but rendering thousands of points in the DOM can be slow, so plan accordingly.
 
 ## How to Run Tests
 
@@ -293,4 +290,4 @@ This project is open-source software licensed under the **MIT License**. See the
 
 ---
 
-*Thank you for using the JavaScript CDP Logger Client!* We hope this library makes it easier to integrate CDP Studio’s powerful logging capabilities into your own tools and applications. ([GitHub - CDPTechnologies/JavascriptCDPLoggerClient: A simple Javascript interface to communicate with CDP applications containing a CDPLogger component to retrieve historic data.](https://github.com/CDPTechnologies/JavascriptCDPLoggerClient#:~:text=A%20simple%20JavaScript%20interface%20for,com))
+*Thank you for using the JavaScript CDP Logger Client!* We hope this library makes it easier to integrate CDP Studio’s powerful logging capabilities into your own tools and applications. ([GitHub - CDPTechnologies/JavascriptCDPLoggerClient](https://github.com/CDPTechnologies/JavascriptCDPLoggerClient#:~:text=A%20simple%20JavaScript%20interface%20for,com))
