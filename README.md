@@ -1,57 +1,57 @@
-# CDPLogger Client for JavaScript
+# CDP Logger Client
 
-A simple JavaScript interface for communicating with CDP applications that include a CDPLogger component to retrieve historic data. 
-- For documentation on the JS logger client see [DOCUMENTATION.md](DOCUMENTATION.md).
-- For a quickstart guide on how to set-up the npm project for either Node or Web see [QUICKSTART.md](QUICKSTART.md)
-- For more information about CDP Studio see https://cdpstudio.com/.
+A JavaScript client for interacting with CDP Logger or LogServer via WebSocket. This client allows you to:
+- Connect to a CDP Logger or LogServer
+- Request logged nodes and their metadata
+- Retrieve data points for specific nodes
+- Query events from the logger
+- Get log limits and API version information
 
 ## Installation
 
-Clone the repository and install dependencies:
-
 ```bash
-npm install
+npm install cdp-logger-client
 ```
 
+## Quick Start
 
-## Running Tests
+For a quick introduction, see the [QUICKSTART.md](QUICKSTART.md) guide.
 
-To run the automatic tests with fake data, execute:
+## Documentation
 
-```bash
-npm test
-```
-
-Note: these jest tests execute on every push and pull of the repo as well.
-
-To test the time sync functionality using simulated response:
-
-```bash
-node test/testTimeSync.js
-```
-
+For detailed documentation, see [DOCUMENTATION.md](DOCUMENTATION.md).
 
 ## Usage
 
-The value.js file contains a simple logger built for the CDP Studio example case.
+### Node.js
 
-1. Set up and run the Logger in CDP Studio.
-(Refer to Help → Framework - Data Logging → How to Setup Logging in Automation System)
-https://cdpstudio.com/manual/cdp/cdplogger/cdplogger-configuration-example.html
+```javascript
+const cdplogger = require('cdp-logger-client');
+global.WebSocket = require('ws');
 
-2. Run the value.js file from the command line:
+const client = new cdplogger.Client('127.0.0.1:17000');
 
-```bash
-node examples/value.js
+// List logged nodes
+client.requestLoggedNodes().then(nodes => {
+  console.log("Available nodes:", nodes);
+});
 ```
 
-For usage related to events run:
+### Browser
 
-```bash
-node examples/event.js
+```html
+<script src="protobuf.min.js"></script>
+<script src="containerPb.js"></script>
+<script src="client.js"></script>
+<script>
+  const client = new cdplogger.Client(window.location.hostname + ":17000");
+  
+  client.requestLoggedNodes().then(nodes => {
+    console.log("Available nodes:", nodes);
+  });
+</script>
 ```
 
+## License
 
-## Contact
-
-Email: support@cdptech.com
+MIT

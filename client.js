@@ -1117,7 +1117,15 @@ class Client {
   }
 }
 
+// Export the module
 const cdplogger = {};
 cdplogger.Client = Client;
 
-module.exports = cdplogger;
+// For Node.js
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = cdplogger;
+}
+// For Browser
+else if (typeof window !== 'undefined') {
+  window.cdplogger = cdplogger;
+}
