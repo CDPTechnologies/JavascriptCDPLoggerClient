@@ -52,6 +52,11 @@ client.requestLoggedNodes().then(nodes => {
 </script>
 ```
 
+## Resources
+
+For more information about CDP Studio see https://cdpstudio.com/.
+Contact: support@cdptech.com
+
 ## License
 
 MIT
