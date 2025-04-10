@@ -1,7 +1,13 @@
 # CDP Logger Client
 
-A JavaScript client for interacting with CDP Logger or LogServer via WebSocket. This client allows you to:
-- Connect to a CDP Logger or LogServer
+# CDP Logger Client
+
+A JavaScript client for reading historic data from systems created with the CDP Studio development platform. 
+For more information about CDP Studio, see https://cdpstudio.com/.
+For more information about CDP Logger, see https://cdpstudio.com/manual/cdp/cdplogger/cdplogger-index.html.
+
+This client allows you to:
+- Connect to a CDP Logger or LogServer component
 - Request logged nodes and their metadata
 - Retrieve data points for specific nodes
 - Query events from the logger
@@ -52,10 +58,9 @@ client.requestLoggedNodes().then(nodes => {
 </script>
 ```
 
-## Resources
+## Contact
 
-For more information about CDP Studio see https://cdpstudio.com/.
-Contact: support@cdptech.com
+Email: support@cdptech.com
 
 ## License
 

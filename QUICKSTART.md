@@ -56,14 +56,6 @@ To enable web support, ensure your `client.js` file includes these modifications
    const EventQuery = root.DBMessaging.Protobuf.EventQuery;
    ```
    
-3. **Expose the Client Globally:**  
-   At the end of your `client.js`, attach the client API to the global window:
-   ```js
-   cdplogger.Client = Client;
-   window.cdplogger = cdplogger;
-   ```
-   This ensures that when `client.js` is loaded in a browser, the `cdplogger` object (and its `Client` class) is available globally.
-
 *Make sure these modifications are only applied for the browser version of your client module.*
 
 ## Usage
