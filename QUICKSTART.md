@@ -24,7 +24,7 @@ For documentation on the JS logger client see [DOCUMENTATION.md](DOCUMENTATION.m
 Install the CDPLogger Client and a WebSocket polyfill (for the Node.js version):
 
 ```bash
-npm install cdp-logger-client ws
+npm install cdplogger-client ws
 ```
 
 ### For Browser
@@ -64,7 +64,7 @@ To enable web support, ensure your `client.js` file includes these modifications
 
 ```js
 // Import the client and set up the WebSocket polyfill
-const cdplogger = require('cdp-logger-client');
+const cdplogger = require('cdplogger-client');
 global.WebSocket = require('ws');
 
 // Create a client instance (endpoint can be "127.0.0.1:17000" or "ws://127.0.0.1:17000")

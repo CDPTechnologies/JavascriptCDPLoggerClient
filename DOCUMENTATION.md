@@ -44,7 +44,7 @@ By using this library, developers can build dashboards, monitoring tools, or scr
 You can install the library from npm:
 
 ```bash
-npm install cdp-logger-client
+npm install cdplogger-client
 ```
 
 This will add the CDP Logger client to your project’s dependencies. The package bundles the necessary JavaScript files and protobuf definitions. The only peer dependency you might need is a WebSocket implementation if you are using Node.js (see **Prerequisites** and **Usage in Node.js** below).
@@ -96,7 +96,7 @@ In Node.js, you will typically import (or require) the library and set up a WebS
 
 ```js
 // 1. Install and import the CDP Logger Client
-const cdplogger = require('cdp-logger-client');
+const cdplogger = require('cdplogger-client');
 
 // 2. Set up WebSocket for Node (since Node has no native WebSocket)
 global.WebSocket = require('ws');  // ensure 'ws' is installed in your project

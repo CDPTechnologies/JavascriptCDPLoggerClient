@@ -1,7 +1,5 @@
 # CDP Logger Client
 
-# CDP Logger Client
-
 A JavaScript client for reading historic data from systems created with the CDP Studio development platform. 
 For more information about CDP Studio, see https://cdpstudio.com/.
 For more information about CDP Logger, see https://cdpstudio.com/manual/cdp/cdplogger/cdplogger-index.html.
@@ -16,7 +14,7 @@ This client allows you to:
 ## Installation
 
 ```bash
-npm install cdp-logger-client
+npm install cdplogger-client
 ```
 
 ## Quick Start
@@ -32,7 +30,7 @@ For detailed documentation, see [DOCUMENTATION.md](DOCUMENTATION.md).
 ### Node.js
 
 ```javascript
-const cdplogger = require('cdp-logger-client');
+const cdplogger = require('cdplogger-client');
 global.WebSocket = require('ws');
 
 const client = new cdplogger.Client('127.0.0.1:17000');
