@@ -31,8 +31,12 @@
     "logger",
     "logger-client"
   ],
-  "author": "",
+  "author": "CDP Technologies",
   "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/CDPTechnologies/JavascriptCDPLoggerClient/issues"
+  },
+  "homepage": "https://github.com/CDPTechnologies/JavascriptCDPLoggerClient#readme",
   "dependencies": {
     "protobufjs": "^7.4.0"
   },
