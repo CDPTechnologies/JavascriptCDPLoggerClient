@@ -41,21 +41,6 @@ client.requestLoggedNodes().then(nodes => {
 });
 ```
 
-### Browser
-
-```html
-<script src="protobuf.min.js"></script>
-<script src="containerPb.js"></script>
-<script src="client.js"></script>
-<script>
-  const client = new cdplogger.Client(window.location.hostname + ":17000");
-  
-  client.requestLoggedNodes().then(nodes => {
-    console.log("Available nodes:", nodes);
-  });
-</script>
-```
-
 ## Contact
 
 Email: support@cdptech.com

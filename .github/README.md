@@ -1,8 +1,8 @@
 # CDPLogger Client for JavaScript
 
 A simple JavaScript interface for communicating with CDP applications that include a CDPLogger component to retrieve historic data. 
-- For documentation on the JS logger client see [DOCUMENTATION.md](DOCUMENTATION.md).
-- For a quickstart guide on how to set-up the npm project for either Node or Web see [QUICKSTART.md](QUICKSTART.md)
+- For documentation on the JS logger client see [DOCUMENTATION.md](../DOCUMENTATION.md).
+- For a quickstart guide on how to set-up the npm project for either Node or Web see [QUICKSTART.md](../QUICKSTART.md)
 - For more information about CDP Studio see https://cdpstudio.com/.
 
 ## Installation

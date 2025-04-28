@@ -1,6 +1,6 @@
 {
   "name": "cdplogger-client",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "A JavaScript client for interacting with CDP Logger or LogServer via WebSocket",
   "main": "client.js",
   "files": [
@@ -38,10 +38,10 @@
   },
   "homepage": "https://github.com/CDPTechnologies/JavascriptCDPLoggerClient#readme",
   "dependencies": {
+    "ws": "^8.13.0",
     "protobufjs": "^7.4.0"
   },
   "devDependencies": {
-    "ws": "^8.13.0",
     "jest": "^29.5.0"
   }
 }
