@@ -146,14 +146,14 @@ A few notes on the above example:
 
 - The `requestLoggedNodes()` call returns an array of node info objects. Each object has at least `{ name: string, routing: string }` and possibly a `tags` object if tags are supported and fetched. The `tags` object is a dictionary of tagName -> `{ value: any, source: string }`. For example, a node could have `node.tags.Unit = { value: "°C", source: "CDPStudio" }` indicating the engineering unit is degrees Celsius.
 
-You can also request historical **data points** for one or more signals using `client.requestDataPoints(names, startTimeSec, endTimeSec, numberOfPoints)`. For example:
+You can also request historical **data points** for one or more signals using `client.requestDataPoints(nodeNames, startS, endS, noOfDataPoints, limit)`. For example:
 
 ```js
 const limits = await client.requestLogLimits();
 const start = limits.startS;
 const end   = limits.endS;
 // Request 100 data points for signals "Temperature" and "Pressure" over the full range
-const dataPoints = await client.requestDataPoints(["Temperature", "Pressure"], start, end, 100);
+const dataPoints = await client.requestDataPoints(["Temperature", "Pressure"], start, end, 100, 0);
 dataPoints.forEach(point => {
   console.log("Timestamp:", point.timestamp);
   // Each point.value will contain an object with keys for each signal name:
@@ -169,11 +169,14 @@ dataPoints.forEach(point => {
 });
 ```
 
-The above demonstrates retrieving 100 aggregated data points between the earliest and latest logged times. Each data point might represent an interval of time within the range, with `min`, `max`, and `last` values of the signal during that interval (this is how the CDP Logger provides downsampled data). If you instead want full resolution data, you can specify `numberOfPoints = 0` to get all points (be careful with performance if the range is large). You can also specify a `limit` (max number of points) separate from the number of intervals, as well as request specific aggregation methods.
+The above demonstrates retrieving 100 aggregated data points between the earliest and latest logged times. Each data point might represent an interval of time within the range, with `min`, `max`, and `last` values of the signal during that interval (this is how the CDP Logger provides downsampled data). If you instead want full resolution data, you can specify `noOfDataPoints = 0` to get all points (be careful with performance if the range is large). You can also specify a `limit` (max number of points) separate from the number of intervals, as well as request specific aggregation methods.
 
 Finally, to retrieve **events**, you can use `client.requestEvents(query)` along with constructing a query object. You can also use `client.countEvents(query)` to just get the count. Here’s a brief Node example for events:
 
 ```js
+// Helpful enums from the client for query construction
+const { MatchType, EventQueryFlags } = cdplogger.Client;
+
 const query = { // Note: all query arguments are optional
   senderConditions: [
     { value: "MyApp.AlarmManager", matchType: MatchType.Exact }
@@ -182,7 +185,7 @@ const query = { // Note: all query arguments are optional
     // Assume events have a field "Text" and we want those containing "Overheat"
     Text: ["Overheat*"]  // '*' wildcard is the default option
   },
-  timeRangeStart: Date.now()/1000 - 24*3600,  // last 24 hours in seconds (if time filtering desired)
+  timeRangeBegin: Date.now()/1000 - 24*3600,  // last 24 hours in seconds (if time filtering desired)
   limit: 50,      // max 50 events
   offset: 0,      // start from the first match
   flags: EventQueryFlags.NewestFirst  // get newest events first
