@@ -1,6 +1,6 @@
 {
   "name": "cdplogger-client",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "description": "A JavaScript client for interacting with CDP Logger or LogServer via WebSocket",
   "main": "client.js",
   "files": [

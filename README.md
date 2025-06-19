@@ -1,6 +1,6 @@
 # CDP Logger Client
 
-A JavaScript client for reading historic data from systems created with the CDP Studio development platform. 
+A JavaScript client for reading historic data from systems created with the CDP Studio development platform.
 For more information about CDP Studio, see https://cdpstudio.com/.
 For more information about CDP Logger, see https://cdpstudio.com/manual/cdp/cdplogger/cdplogger-index.html.
 
@@ -31,7 +31,6 @@ For detailed documentation, see [DOCUMENTATION.md](DOCUMENTATION.md).
 
 ```javascript
 const cdplogger = require('cdplogger-client');
-global.WebSocket = require('ws');
 
 const client = new cdplogger.Client('127.0.0.1:17000');
 
@@ -39,6 +38,36 @@ const client = new cdplogger.Client('127.0.0.1:17000');
 client.requestLoggedNodes().then(nodes => {
   console.log("Available nodes:", nodes);
 });
+```
+
+### Browser
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+    <script src="path/to/protobuf.min.js"></script>
+    <script>
+        // Make protobuf root available globally
+        const root = window.root;
+        const Container = root.DBMessaging.Protobuf.Container;
+        const CDPValueType = root.ICD.Protobuf.CDPValueType;
+        const EventQuery = root.DBMessaging.Protobuf.EventQuery;
+    </script>
+    <script src="path/to/generated/containerPb.js"></script>
+    <script src="path/to/client.js"></script>
+</head>
+<body>
+    <script>
+        const client = new cdplogger.Client('ws://127.0.0.1:17000');
+
+        // List logged nodes
+        client.requestLoggedNodes().then(nodes => {
+            console.log("Available nodes:", nodes);
+        });
+    </script>
+</body>
+</html>
 ```
 
 ## Contact

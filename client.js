@@ -1,5 +1,18 @@
-const WebSocket = require('ws');
-const root = require('./generated/containerPb.js');
+// Environment detection and dependency loading
+let root;               // protobuf definitions
+let WS;                 // WebSocket constructor
+
+if (typeof window === 'undefined') {
+  // ---- Node / CommonJS ----
+  root = require('./generated/containerPb.js');
+  WS   = global.WebSocket || require('ws');
+  global.WebSocket = WS;              // make sure anything else sees it
+} else {
+  // ---- Browser ----
+  root = window.root;                // injected by <script src="containerPb.js">
+  WS   = window.WebSocket;
+}
+
 const Container = root.DBMessaging.Protobuf.Container;
 const CDPValueType = root.ICD.Protobuf.CDPValueType;
 const EventQuery = root.DBMessaging.Protobuf.EventQuery;
@@ -468,7 +481,7 @@ class Client {
   // --- Internal methods ---
 
   _connect(url) {
-    const ws = new WebSocket(url);
+    const ws = new WS(url);
     ws._url = url;
     ws.binaryType = 'arraybuffer';
     ws.onopen = () => this._onOpen(ws);

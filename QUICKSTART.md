@@ -1,6 +1,6 @@
 # Quick Start Guide – CDPLogger Client
 
-This guide demonstrates how to get started with the CDPLogger Client in both **Node.js** and **Browser** environments. Note that the client module must be built differently for each target environment.
+This guide demonstrates how to get started with the CDPLogger Client in both **Node.js** and **Browser** environments. The client automatically detects the environment and works seamlessly in both.
 
 ## Documentation
 
@@ -8,64 +8,47 @@ For documentation on the JS logger client see [DOCUMENTATION.md](DOCUMENTATION.m
 
 ## Overview
 
-- **Node.js Version:**
-  - Uses CommonJS modules (imported via `require()`).
-  - Loads protobuf definitions from local files (e.g. from `./generated/containerPb.js`).
-  - Requires a WebSocket polyfill (such as the `ws` package) since Node.js lacks a native WebSocket.
+The CDPLogger Client uses **automatic environment detection** to work in both Node.js and browser environments from a single source file:
 
-- **Browser Version:**
-  - Uses the browser's native WebSocket.
-  - Obtains protobuf definitions from the global scope via `window.root` (set by including `containerPb.js`).
+- **Node.js:**
+  - Automatically loads protobuf definitions using `require('./generated/containerPb.js')`
+  - Uses the `ws` package for WebSocket functionality (installed as a dependency)
+  - No manual setup required
+
+- **Browser:**
+  - Uses the browser's native WebSocket API
+  - Expects protobuf definitions to be available at `window.root`
+  - Requires including the containerPb.js script before the client
 
 ## Installation
 
 ### For Node.js
 
-Install the CDPLogger Client and a WebSocket polyfill (for the Node.js version):
-
 ```bash
-npm install cdplogger-client ws
+npm install cdplogger-client
 ```
 
 ### For Browser
 
 Include the following scripts in your HTML:
 - `protobuf.min.js` – for the ProtoBuf runtime.
-- `containerPb.js` – which sets up `window.root` with your protobuf definitions.
-- The web version of `client.js` – which should include the web-specific modifications (see the "Adapting client.js for Web Support" section below).
-
-## Adapting client.js for Web Support
-
-To enable web support, ensure your `client.js` file includes these modifications:
-
-1. **Use the Browser's Native WebSocket:**  
-   In the web version, remove or comment out any code that requires a WebSocket polyfill. For example:
+- `containerPb.js` – which sets up `window.root` with your protobuf definitions
+- `client.js` – the same file works in both Node.js and browser environments
+- Instead of importing protobuf definitions via CommonJS, obtain them from the global scope:
    ```js
-   // const WebSocket = require('ws'); // Do not use this in the browser
-   ```
-   
-2. **Use Global Protobuf Definitions:**  
-   Instead of importing protobuf definitions via CommonJS, obtain them from the global scope:
-   ```js
-   // For Node.js, you might load:
-   // const root = require('./generated/containerPb.js');
-   // For Browser, use the global "root" defined by containerPb.js:
    const root = window.root;
    const Container = root.DBMessaging.Protobuf.Container;
    const CDPValueType = root.ICD.Protobuf.CDPValueType;
    const EventQuery = root.DBMessaging.Protobuf.EventQuery;
    ```
-   
-*Make sure these modifications are only applied for the browser version of your client module.*
 
 ## Usage
 
 ### Node.js Example
 
 ```js
-// Import the client and set up the WebSocket polyfill
+// Import the client
 const cdplogger = require('cdplogger-client');
-global.WebSocket = require('ws');
 
 // Create a client instance (endpoint can be "127.0.0.1:17000" or "ws://127.0.0.1:17000")
 const client = new cdplogger.Client('127.0.0.1:17000');
@@ -106,7 +89,7 @@ setTimeout(() => {
 }, 5000);
 ```
 
-*In the Node.js version, the module is imported using `require()`, and the WebSocket polyfill is provided by the `ws` package.*
+*The client automatically detects the Node.js environment and uses the `ws` package for WebSocket functionality.*
 
 ### Browser Example
 
@@ -122,11 +105,17 @@ Create an HTML file that includes the necessary scripts. For example:
     <script src="protobuf.min.js"></script>
     <!-- Include containerPb.js to set up global "root" -->
     <script src="containerPb.js"></script>
-    <!-- Include client.js (the web version with browser-specific modifications) -->
+    <!-- Include client.js -->
     <script src="client.js"></script>
   </head>
   <body>
     <script>
+      // Access protobuf definitions from global scope
+      const root = window.root;
+      const Container = root.DBMessaging.Protobuf.Container;
+      const CDPValueType = root.ICD.Protobuf.CDPValueType;
+      const EventQuery = root.DBMessaging.Protobuf.EventQuery;
+      
       // The client is now available globally as "cdplogger" (attached to window)
       // Use window.location.hostname to connect to the same host as the web page
       const client = new cdplogger.Client(window.location.hostname + ":17000");
@@ -169,7 +158,8 @@ Create an HTML file that includes the necessary scripts. For example:
 ## Prerequisites
 
 - **CDP Studio:** Ensure a CDP Studio application is running with an active **CDPLogger** (or LogServer) on a known WebSocket port (e.g., 17000).
-- **For Node.js:** Install the `ws` package as a WebSocket polyfill.
+- **For Node.js:** No additional setup required - WebSocket support is automatically configured.
+- **For Browser:** Ensure `containerPb.js` is available and sets up `window.root` with protobuf definitions.
 
 ## Learn More
 

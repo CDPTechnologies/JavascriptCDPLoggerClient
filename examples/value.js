@@ -1,7 +1,6 @@
-// index.js
-// Example demonstration including an events query for a specific time range (UTC 9:40)
+// value.js
+// Example demonstration showing how to retrieve logged node data
 
-global.WebSocket = require('ws');
 const cdplogger = require('../client');
 
 // Print the node information (name, routing, and tags)
