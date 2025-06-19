@@ -7,9 +7,19 @@ A simple JavaScript interface for communicating with CDP applications that inclu
 
 ## Installation
 
+### NPM Package (Recommended)
+
+```bash
+npm install cdplogger-client
+```
+
+### Development Setup
+
 Clone the repository and install dependencies:
 
 ```bash
+git clone https://github.com/CDPTechnologies/JavascriptCDPLoggerClient.git
+cd JavascriptCDPLoggerClient
 npm install
 ```
 
